@@ -1288,8 +1288,10 @@ class Engine:
                         self.bump()
                         return
                     with self.cli.gate(key):
-                        # Signed out of Claude Code (None): no login the mirror would save again, so none is in use.
-                        if self.cli.adapter.active_identity() == account["identity"]:
+                        # In use: the login Claude Code holds, or, while it holds none, the account its settings
+                        # still name. That one is shown as in use, and the login saved here may go back in
+                        # (switch_cli.repair). Signed out of every account known here: none is in use.
+                        if account["identity"] in (self.cli.adapter.active_identity(), self.active_identity.get("claude_cli")):
                             raise DeckError("The account in use by your terminals cannot be removed.", "invalid")
                         self.accounts.remove(key)
                 self.scheduler.forget(key)

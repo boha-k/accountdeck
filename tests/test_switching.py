@@ -647,6 +647,11 @@ class TerminalSwitchTests(SyntheticTestCase):
         self.sign_in_again(terminal_login(self.alpha, "", now=time.time() + 600, token="alpha-again")[0])
         self.engine.sense_active()
         self.assertEqual(self.engine.cli.repair_wanted, (self.alpha_key, "lost"))
+        # Claude Code holds no login now, but alpha is still the account in use, the one this sign-in goes to.
+        self.engine.action("remove", {"id": self.alpha_key})
+        self.assertTrue(self.engine.runner.wait(10))
+        self.assertEqual(self.engine.runner.report()["error"]["code"], "invalid")
+        self.assertEqual(self.engine.vault.get(self.alpha_key)["credentials"]["claudeAiOauth"]["refreshToken"], "refresh-alpha-again")
 
         class Stopped(BaseException):
             pass
