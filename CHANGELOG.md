@@ -12,6 +12,12 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   request still names AccountDeck.
 - Keep the data saved by 2.2.0 as a synthetic fixture and test future updates against it, including Antigravity sign-ins.
 
+### Fixed
+
+- A terminal switch that runs while `/login` is half done (Claude Code has the new account's login but still
+  names the old account) no longer saves the new login under the old account. The switch waits instead, so
+  neither account needs a new sign-in.
+
 ## [2.2.0] - 2026-11-15
 
 The first public release. Installing it over 2.0.0 or 2.1.0 is an update that keeps every saved account.

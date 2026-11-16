@@ -322,6 +322,20 @@ class TerminalSwitchTests(SyntheticTestCase):
                          before)
         self.assertEqual(recover_transactions(self.engine.vault), [])
 
+    def test_a_sign_in_caught_half_way_is_never_saved_under_the_account_it_replaces(self):
+        # /login as gamma wrote gamma's token, and `.claude.json` still names alpha when a switch runs.
+        gamma = new_uuid()
+        self.terminal.owners["refresh-gamma"] = gamma
+        atomic_write(self.paths.claude_cli_credentials,
+                     json_bytes(terminal_login(gamma, "gamma@example.test", token="gamma")[0]))
+        before = self.live_bytes()
+        with self.assertRaises(DeckError) as refused:
+            perform(self.engine.cli, self.beta_key)
+        self.assertEqual(refused.exception.code, "identity")
+        self.assertEqual(self.live_bytes(), before)             # gamma's sign-in stays where it is
+        self.assertEqual(self.engine.vault.get(self.alpha_key)["credentials"]["claudeAiOauth"]["refreshToken"],
+                         "refresh-alpha")                       # and alpha keeps its own login
+
     def test_rollback_keeps_a_login_claude_code_wrote_after_the_switch(self):
         real = self.engine.cli.adapter.current
         # Claude Code renews the swapped-in login (a later end, the shared entries kept); it is beta's.
