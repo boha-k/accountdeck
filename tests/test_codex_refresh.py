@@ -251,6 +251,17 @@ class CodexRenewalTests(SyntheticTestCase):
         self.assertEqual(self.engine.vault.get(self.key), self.before)
         self.assertEqual((self.engine.recovery, self.engine.login_held("acct-saved")), ([], False))
 
+    def test_a_sign_in_left_by_an_add_cut_short_is_saved_at_start(self):
+        # A crash during a Codex Add leaves its sign-in folder behind, with the sign-in that finished there in the clear.
+        home = self.paths.data_dir / "work" / "login-cut-short"
+        home.mkdir(parents=True)
+        added = codex_auth("acct-added", exp=time.time() + 5 * 86400, refresh="rt-added")
+        (home / "auth.json").write_text(json.dumps(added))
+        self.engine.stop()
+        engine = self.make_engine(codex=self.codex)     # the next start
+        self.assertEqual(engine.vault.get(engine.store.find("codex", "acct-added")["id"]), added)
+        self.assertFalse(home.exists())
+
     def test_a_renewal_that_never_left_this_mac_costs_nothing(self):
         with mock.patch.object(self.codex, "token_endpoint_answers", return_value=False), self.helper():
             self.engine._refresh(self.key)

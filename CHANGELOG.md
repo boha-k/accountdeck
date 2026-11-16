@@ -42,6 +42,9 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 - Importing accounts from your PC now says which of this Mac's settings will change to match the PC, before
   you import and once it is done, for example "switching accounts automatically (on)". Before, a Mac with
   auto-switch off could come out of an import with it on, without a word.
+- If AccountDeck quits or crashes during a Codex Add, the sign-in that finished meanwhile is saved at the next
+  start and its unencrypted copy is deleted. Before, that copy stayed in AccountDeck's data folder and the
+  sign-in was not saved.
 
 ## [2.2.0] - 2026-11-15
 

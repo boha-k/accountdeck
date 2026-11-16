@@ -219,6 +219,7 @@ class Engine:
         if self.owns_login:
             self.store.cap_pauses(RETRY_AFTER_CAP + RATE_LIMIT_MARGIN)
             self.accounts.settle_renewals()
+            self.accounts.rescue_sign_ins()
             try:
                 self.agy.recover_at_start()
             except Exception as exc:     # Claude's and Codex's accounts must still start
