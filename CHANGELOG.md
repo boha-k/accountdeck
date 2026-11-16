@@ -17,6 +17,10 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 - A terminal switch that runs while `/login` is half done (Claude Code has the new account's login but still
   names the old account) no longer saves the new login under the old account. The switch waits instead, so
   neither account needs a new sign-in.
+- Recover no longer gets stuck after an interrupted Codex switch when Codex renewed or changed its sign-in
+  afterwards. Codex keeps the sign-in it has now, AccountDeck saves it, and Codex and Claude Desktop switches
+  work again. Before, every Recover said "Recovery paused", and the account Codex had before could end up
+  needing a new sign-in.
 
 ## [2.2.0] - 2026-11-15
 

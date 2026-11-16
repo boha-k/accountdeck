@@ -17,7 +17,7 @@ from pathlib import Path
 import shutil
 import time
 
-from . import activity, contract, diagnostics
+from . import activity, contract, diagnostics, switch_codex
 from .accounts import HEALTH_MESSAGES
 from .claude_verify import (NOT_OPENED, OPEN_IT, BackgroundVerifier, Verdict, Verifier, cache_org, config_keys,
                             files_present, generation_digest, log_size, log_text, mcp_names, token_cache_summary,
@@ -1245,7 +1245,7 @@ class Recover(ClaudeJob):
         if tx.doc.get("provider") == "codex":
             if ctx.procs.codex_consumers() or ctx.procs.codex_daemon():
                 raise DeckError("Close your Codex sessions, then try again.", "busy")
-            tx.rollback()
+            switch_codex.recover_one(ctx, tx)
             return False
         outgoing = tx.doc.get("outgoing_id")
         if not outgoing or ctx.store.account(outgoing) is None:
