@@ -27,7 +27,7 @@ trap 'rm -rf "$T"' EXIT
 if [ -z "${ACCOUNTDECK_BASELINES:-}" ]; then
     found=() names=()
     if [ -e .git ] && command -v git >/dev/null 2>&1; then
-        for version in 2.0.0 2.1.0; do
+        for version in 2.0.0 2.1.0 2.2.0; do
             git rev-parse --verify --quiet "v$version^{commit}" >/dev/null || continue
             mkdir "$T/release-$version"
             git archive "v$version" | tar -x -C "$T/release-$version"
@@ -38,7 +38,7 @@ if [ -z "${ACCOUNTDECK_BASELINES:-}" ]; then
         ACCOUNTDECK_BASELINES=$(IFS=:; echo "${found[*]}")
         echo "old builds checked: ${names[*]} (from their tags)"
     else
-        echo "old builds: skipped (no tag v2.0.0 or v2.1.0 here: those releases predate this repository's history)"
+        echo "old builds: skipped (no released tags here)"
     fi
 else
     echo "old builds checked: those ACCOUNTDECK_BASELINES names"

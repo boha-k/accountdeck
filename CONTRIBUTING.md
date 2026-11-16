@@ -46,7 +46,7 @@ shape of the `run.py --doctor` report. The JavaScript check needs `node` on your
 check needs `ruby` (macOS has one); without them, check.sh reports that part as skipped (CI runs both). It
 also checks that older releases can still open data this build used (see below) when their builds are at
 hand; 2.0.0 and 2.1.0 were released before this repository's history begins, so in a clone of it check.sh
-says it skipped that part. Extra arguments go to `unittest`, for example
+checks the available public releases and skips those two old builds. Extra arguments go to `unittest`, for example
 `bash tools/check.sh -k test_vault`.
 
 Pull requests also run `tools/upgrade_test.sh` (old versions installed and updated in a temporary folder) and
@@ -131,9 +131,10 @@ hold the promise:
   `tests/fixtures/make_baseline_data.py`) loads in this build with every account, secret, setting and import
   record, and the schema stays as it was but for Antigravity's table, added after a backup. In reverse,
   the old builds named by `ACCOUNTDECK_BASELINES` (checkouts, `:`-separated; `tools/check.sh` makes them from
-  the tags `v2.0.0` and `v2.1.0` where a checkout has them, which only the maintainer's does: both releases
+  the tags `v2.0.0`, `v2.1.0` and `v2.2.0` where a checkout has them; the first two releases
   predate this repository's history) still open the folder after this build used it, with every kind of
-  Antigravity data in it, and see none of it, which is what a rollback needs.
+  Antigravity data in it. Pre-2.2 builds leave that data alone; newer builds preserve its saved sign-ins
+  while recovering any unfinished operations, which is what a rollback needs.
 - A frozen-identifiers test: the values above that live in code, with a message that says what changing one
   costs.
 - `tools/upgrade_test.sh`: each old version installed with saved data, this build installed over it, then the

@@ -5,8 +5,8 @@ puts the previous app back when the new one fails its health check) finds the fo
 One data folder per release, made with that release's own code by tests/fixtures/make_baseline_data.py (see its
 docstring for what each holds), under the fixed test vault key below. The old builds come from
 ACCOUNTDECK_BASELINES: checkouts separated by ":", each naming its version in accountdeck/__init__.py
-(tools/check.sh makes them from the tags v2.0.0 and v2.1.0 with git archive where a checkout has them: both releases
-predate this repository's history, so only the maintainer's checkout does).
+(tools/check.sh makes them from released tags with git archive where a checkout has them; 2.0.0 and 2.1.0
+predate this repository's history).
 
 What this build adds to a folder is Antigravity's data: a table of its own inside schema 2 (the one change the
 schema check allows), `agy-` vault records and two settings. The old builds must open a folder holding every kind of
@@ -49,7 +49,8 @@ class Release:
 
 
 RELEASES = {"2.0.0": Release("baseline-data.zip", rows=16, saved=11, threshold=90),
-            "2.1.0": Release("baseline-data-2.1.0.zip", rows=23, saved=18, threshold=88)}
+            "2.1.0": Release("baseline-data-2.1.0.zip", rows=23, saved=18, threshold=88),
+            "2.2.0": Release("baseline-data-2.2.0.zip", rows=23, saved=18, threshold=88)}
 
 
 def version_key(text):
@@ -153,6 +154,9 @@ try:
     seen["recovery"], seen["failing"] = list(engine.recovery), sorted(engine.health()["failing_phases"])
 finally:
     engine.stop()
+seen["saved_after"] = {p.name: hashlib.sha256(vault.protect(p.read_bytes(), True)).hexdigest()
+                       for p in vault.root.glob("agy-*.dpapi")
+                       if not p.name.startswith(("agy-transaction-", "agy-enrollment"))}
 print(json.dumps(seen))
 """
 
@@ -218,7 +222,7 @@ class ReleaseData:
         builds = baselines()
         if not builds:
             self.skipTest("no old build to check: ACCOUNTDECK_BASELINES names none (tools/check.sh makes them from "
-                          "the tags v2.0.0 and v2.1.0)")
+                          "released tags)")
         engine = self.engine
         # What only this build writes is in the folder too: the update check's setting and its internal memory, and
         # every kind of Antigravity data.
@@ -270,11 +274,21 @@ class ReleaseData:
                 self.assertEqual(seen["records"], here["records"])     # every secret, as this build left it
                 self.assertEqual(seen["threshold"], 92)
                 self.assertEqual(seen["labels"][key], "Renamed here")
-                # It sees nothing of Antigravity: no account in its state or its reads, no switch to recover, no
-                # phase of its tick failing. And this build finds its Antigravity data as it left it.
+                # Antigravity stays outside the other apps' state and scheduler, and the tick remains healthy.
+                # Pre-2.2 builds leave all of its data alone; newer builds can settle its recovery journals.
                 self.assertFalse(agy_ids & (set(seen["labels"]) | set(seen["targets"])))
-                self.assertEqual((seen["recovery"], seen["failing"]), ([], []))
-                self.assertEqual(antigravity_data(root / self.paths.data_dir.relative_to(self.paths.temp_root)), agy)
+                self.assertEqual(seen["failing"], [])
+                after = antigravity_data(root / self.paths.data_dir.relative_to(self.paths.temp_root))
+                if version_key(version) < (2, 2, 0):
+                    self.assertEqual(seen["recovery"], [])
+                    self.assertEqual(after, agy)
+                else:
+                    # 2.2 knows Antigravity and may settle its unfinished operations at startup.
+                    # The saved accounts, settings and every generation of each login must remain.
+                    self.assertEqual(after[:2], agy[:2])
+                    saved = {name: value for name, value in agy[2].items()
+                             if not name.startswith(("agy-transaction-", "agy-enrollment"))}
+                    self.assertEqual(seen["saved_after"], saved)
                 checked += 1
         if not checked:
             self.skipTest(f"no old build given opens {self.VERSION} data")
@@ -310,6 +324,24 @@ class Release210Data(ReleaseData, SyntheticTestCase):
         self.assertEqual(engine.store.care()["backups"], self.backups + 1)
         self.assertEqual(engine.store.setting("claude_code_compat")["passed"], "2.1.300")
         self.assertIn("claude_cli", engine.store.setting("usage_shapes"))
+
+
+class Release220Data(ReleaseData, SyntheticTestCase):
+    VERSION = "2.2.0"
+
+    def test_antigravity_signins_and_update_settings_survive(self):
+        engine = self.engine
+        expected = {"ada.fixture@example.test", "bob.fixture@example.test"}
+        rows = [row for row in engine.store.agy_accounts() if row["email"] in expected]
+        self.assertEqual({row["email"] for row in rows}, expected)
+        for row in rows:
+            record = engine.vault.get(agy_key(row["id"]))
+            self.assertEqual(record["email"], row["email"])
+            self.assertTrue(record["stores"]["cli"]["token"]["refresh_token"].startswith("demo-refresh-"))
+        self.assertFalse(engine.store.setting("agy_usage_on_open"))
+        self.assertTrue(engine.store.setting("agy_notice_seen"))
+        self.assertFalse(engine.store.setting("update_check"))
+        self.assertEqual(engine.store.setting(updates.MEMORY_KEY)["latest"], "2.2.0")
 
 
 if __name__ == "__main__":

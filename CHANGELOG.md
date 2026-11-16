@@ -4,6 +4,10 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each version has a heading
 `## [X.Y.Z] - YYYY-MM-DD`; the release notes on GitHub are cut from these headings.
 
+## [Unreleased]
+
+- Keep the data saved by 2.2.0 as a synthetic fixture and test future updates against it, including Antigravity sign-ins.
+
 ## [2.2.0] - 2026-11-15
 
 The first public release. Installing it over 2.0.0 or 2.1.0 is an update that keeps every saved account.
