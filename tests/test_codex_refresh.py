@@ -9,6 +9,7 @@ from unittest import mock
 
 from tests.helpers import CODEX_RATES, SyntheticTestCase, codex_auth
 
+from accountdeck import switch_codex
 from accountdeck.core import DeckError
 from accountdeck.procs import FakeProcessController
 from accountdeck.providers import codex as codex_module
@@ -246,6 +247,7 @@ class CodexRenewalTests(SyntheticTestCase):
         self.engine.action("recover", {"provider": "codex", "plan_id": plan["plan_id"], "consent": "now"})
         self.assertTrue(self.engine.runner.wait(10))
         self.assertEqual(self.engine.runner.report()["outcome"], "success")
+        self.assertEqual(self.engine.runner.report()["summary"], switch_codex.KEPT)
         self.assertEqual(json.loads(self.auth.read_text()), renewed)          # Codex keeps the newer login ...
         self.assertEqual(self.engine.vault.get(target), renewed)              # ... saved as its own account's
         self.assertEqual(self.engine.vault.get(self.key), self.before)

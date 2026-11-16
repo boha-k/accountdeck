@@ -94,32 +94,39 @@ WAIT_EXPIRED = ("Codex sessions were still open when this switch's confirmation 
                 "review the switch again.")
 RESTORED = "The previous Codex sign-in was restored."
 KEPT = "Codex changed its sign-in after the interrupted switch, so AccountDeck left that sign-in in place and saved it."
+LEFT = ("Codex changed after the interrupted switch and holds no sign-in AccountDeck can save, so AccountDeck left "
+        "Codex as it is. Your saved accounts are unchanged.")
+RECOVERED = (RESTORED, KEPT, LEFT)      # what Recover says, the one furthest from "restored" when records differ
 
 
 def recover_one(ctx, tx):
-    """Recover for one interrupted Codex switch (`tx`); True when Codex keeps what it holds now. auth.json gets the
-    login from before the switch while it still holds the one the switch wrote. When Codex wrote another since (it
-    renewed the login it was given, or was signed in again), that one is newer than anything the record could put
-    back, so it stays: it is saved under the account its own tokens name, and the record is closed ("kept"), as a
-    record is never put back once it was found in conflict. Nothing is written to auth.json then, so no Codex
-    session is touched. The login from before the switch was saved by the switch before it wrote anything."""
+    """Recover for one interrupted Codex switch (`tx`); returns what to say: RESTORED, KEPT or LEFT. auth.json gets
+    the login from before the switch while it still holds the one the switch wrote. When Codex wrote another since
+    (it renewed the login it was given, or was signed in again), that one is newer than anything the record could
+    put back, so it stays: it is saved under the account its own tokens name (KEPT), and the record is closed
+    ("kept"), as a record is never put back once it was found in conflict. Nothing is written to auth.json then, so
+    no Codex session is touched. The login from before the switch was saved by the switch before it wrote anything.
+    The record is closed in the same way when Codex holds nothing AccountDeck can save (LEFT)."""
     try:
         tx.rollback()
-        return False
+        return RESTORED
     except DeckError as exc:
         if exc.code != "recovery":
             raise
+    said = KEPT
     try:
         ctx.accounts.capture("codex", owner="v2")
     except DeckError as exc:
-        # Signed out, or a login only another computer's AccountDeck saves: nothing to keep here. Anything else
-        # (the vault, the keychain) leaves the record open for the next Recover.
+        # Signed out, an API key, a file that cannot be read, or a login only another computer's AccountDeck
+        # saves: nothing to keep here. Anything else (the vault, the keychain) leaves the record open for the
+        # next Recover.
         if exc.code not in ("login_needed", "read_only"):
             raise
+        said = LEFT
     tx.doc["status"] = "kept"
     tx.save()
-    log("codex.recover_kept")
-    return True
+    log("codex.recover_kept", saved=said is KEPT)
+    return said
 
 
 class CodexSwitch(Operation):
@@ -260,12 +267,12 @@ def dispatch(engine, name, body):
         def recover():
             if processes(ctx)[2].pairs or engine.read_only:
                 raise DeckError("Close Codex before recovering.", "busy")
-            kept = False
+            said = RESTORED
             for key in engine.recovery:
                 tx = FileTransaction.load(ctx.vault, engine.roots(), key)
                 if tx.doc.get("provider") == "codex":
-                    kept = recover_one(ctx, tx) or kept
-            return KEPT if kept else RESTORED
+                    said = max(said, recover_one(ctx, tx), key=RECOVERED.index)
+            return said
         return submit(ctx, claimed, QuickOp("recover", recover, provider="codex", message="Recovering Codex…",
                                            step=("recover", "Restoring the previous sign-in")))
     if name in ("add", "finish-login", "cancel-login"):

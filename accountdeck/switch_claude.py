@@ -1209,6 +1209,7 @@ class Recover(ClaudeJob):
             ("prepare", "Checking what to recover"), ("wait", "Waiting for Claude to finish"), ("stop", "Closing Claude"),
             ("settle", "Waiting for Claude to let go of its files"), ("restore", "Putting the previous sign-in back"),
             ("launch", "Opening Claude"), ("report", "Done")))
+        self.codex_said = None
 
     def _body(self):
         ctx = self.ctx
@@ -1232,9 +1233,10 @@ class Recover(ClaudeJob):
             self.note("Claude was not running." if involves_claude else "Claude isn't involved.", step_id="launch",
                       status="skipped")
         with self.step("report"):
-            self.report["summary"] = "Your previous sign-in is back." + (
-                " Code sessions started since were kept." if kept_sessions else "") + (
-                " Claude was reopened." if involves_claude and self.was_running and self.opened else "")
+            said = ("Your previous sign-in is back." if involves_claude or not self.codex_said else None,
+                    "Code sessions started since were kept." if kept_sessions else None, self.codex_said,
+                    "Claude was reopened." if involves_claude and self.was_running and self.opened else None)
+            self.report["summary"] = " ".join(part for part in said if part)
 
     def _load_pending(self):
         ctx, found = self.ctx, []
@@ -1252,7 +1254,9 @@ class Recover(ClaudeJob):
         if tx.doc.get("provider") == "codex":
             if ctx.procs.codex_consumers() or ctx.procs.codex_daemon():
                 raise DeckError("Close your Codex sessions, then try again.", "busy")
-            switch_codex.recover_one(ctx, tx)
+            said = switch_codex.recover_one(ctx, tx)
+            if said != switch_codex.RESTORED:
+                self.codex_said = said          # Codex keeps what it holds: the summary says so
             return False
         if tx.doc.get("purpose") == "recover":
             # A Recover cut short before its own record closed: that record's "before" is the switch's target, so
