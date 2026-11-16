@@ -218,15 +218,21 @@ and the `accounts` rows, so none of them can reach it. The state shows it as one
 - **An automatic use.** `reset_auto.py` (the setting `auto_reset`, off by default, and only with
   `cli_autoswitch` and `claude_resets` on) runs on the tick just before auto-switch. `due` (pure) takes the rows
   auto-switch decides on (`cli_auto.inputs`) and says whether every account of the terminal pool is at the bar
-  (97 %, or the switch point when higher) in its weekly or Fable weekly limit, by readings at most 15 minutes
-  old; an unknown reading means no, and that account is read again. `choose` takes the rows `reset-plan` would
+  (97 %; for the account in use the switch point when higher) in its weekly or Fable weekly limit, by readings
+  at most 15 minutes old; an unknown reading means no, and that account is read again. A reading that shows an
+  account out is unknown too when it was taken before a reset used on that account through AccountDeck
+  (`used` in the memory, the user's own included) or under 10 minutes after it, and a limit that refills by
+  itself within 10 minutes is waited for. `choose` takes the rows `reset-plan` would
   offer (`Resets.usable_rows`) and picks one that refills every limit holding its account back: the account in
   use first, then the least reset that suffices, the earliest expiry, auto-switch's order.
-  `Resets.use_automatically` starts the same `ResetOperation`, which asks `confirm` once more right before the
+  `Resets.use_automatically` starts the same `ResetOperation`, whose last look also checks that the reset
+  still refills what is out, and which asks `confirm` once more right before the
   request; `confirm` writes `last` (account, time, limits, `open`, `unsure`) to the memory first, as the request
   key is written. Afterwards `reset_auto.finished` (from `engine._record_outcome`) records the outcome, the
   event and the alert. The next tick waits for a reading of that account: under the bar closes `last`; still at
   the bar 10 minutes or more after the reset sets `stopped`, which only turning the setting off and on clears.
+  The tick does nothing while a job runs or records its end, and it settles an open `last` also while the
+  setting is off (then without stopping anything), so that it is never judged by a later week's reading.
   An outcome not known keeps `unsure` until the request key settles (`Resets._auto_verdict`). Auto-switch waits
   up to 2 minutes for that reading (`reset_auto.awaited` in `cli_auto._hold`), so the two never act on the same
   stale numbers; while the operation runs, auto-switch is held like under any other job. The state gets
@@ -239,8 +245,9 @@ and the `accounts` rows, so none of them can reach it. The state shows it as one
   from either entry can settle it, and confirmed uses update both cached counts. Incomplete reads keep the
   request after its retry window. Failed setting writes restore the last committed in-memory state.
 - **What it keeps.** The internal setting `limit_resets`: per account Claude's last block with its grant ids,
-  the read's timing, and an open request key; and `auto`, what `reset_auto` remembers (`last`, `failed`,
-  `stopped`; an older build drops it unread). No table, no vault record; it never reaches the state or
+  the read's timing, an open request key and `used`, when a reset was last used on the account through
+  AccountDeck; and `auto`, what `reset_auto` remembers (`last`, `failed`, `stopped`). An older build drops
+  `used` and `auto` unread. No table, no vault record; it never reaches the state or
   `/api/settings`.
 
 ## Rules nothing may break

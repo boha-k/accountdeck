@@ -121,16 +121,20 @@ copy that is running offers it in its update prompt. Push one only when the main
   `reset_auto` uses one Claude Code reset by itself, and only when every account in the terminal pool is out. The
   pool is the account in use and every account auto-switch could move to. An account that is frozen, on hold,
   locked by Claude, in need of sign-in or about to lose its login is outside it, and so is one the user left out
-  unless the terminals are on it. Out means 97 % or more (the switch point when that is higher) of the weekly or
-  the Fable weekly limit, by a reading at most 15 minutes old, with that limit's reset still ahead; one account
-  with room, or one whose reading cannot say, and nothing is used. The 5-hour limit never makes an account out.
+  unless the terminals are on it. Out means 97 % or more (for the account in use the switch point when that is
+  higher) of the weekly or the Fable weekly limit, by a reading at most 15 minutes old, with that limit's reset
+  still ahead; one account with room, or one whose reading cannot say, and nothing is used. A reading that shows
+  an account out cannot say when it was taken before a reset used on that account through AccountDeck (the
+  user's own included) or under 10 minutes after it, and a limit that refills by itself within 10 minutes is
+  waited for. The 5-hour limit never makes an account out.
   The reset used is one `reset-plan` would offer now that refills every limit holding that account back: on the
   account in use first, else the one that refills the least beyond what is out (a Fable reset when only Fable is
   out), then the one that expires first, then auto-switch's order. Never an account the user left out, never a
   Codex or Claude Desktop reset. One at a time: none while another job runs (no job gives way to it), while
-  auto-switch itself is held, while any account's request key is open, before a reading of that account showed
+  auto-switch itself is held, while any Claude account's request key is open, before a reading of that account showed
   the refill, within an hour of the last one, or within 10 minutes (doubling to an hour) of a try that used
-  nothing. The tick only decides and makes no request; the operation asks once more right before sending, and
+  nothing. The tick only decides and makes no request; the operation's last look checks that the reset still
+  refills what is out, it asks once more right before sending (still due, the three settings still on), and
   the record of the use (`last` in `limit_resets`) is saved before the request is sent, as the request key is. A
   reading taken 10 minutes or more after a reset that still shows its limit at the bar stops automatic resets,
   with an alert, until the user turns the setting off and on; so does a record that cannot be read back. Every

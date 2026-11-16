@@ -478,12 +478,16 @@ auto-switch and **Read Claude limit resets** are on. A reset that is used cannot
 are narrow:
 
 - **When.** Every terminal account your terminals could run on must be out: at 97 % or more of its weekly
-  limit or its Fable weekly limit (at your switch point, if you set that higher), by a reading under 15
-  minutes old, with that limit's own reset still ahead. The accounts that count are the one in use and
+  limit or its Fable weekly limit, by a reading under 15 minutes old, with that limit's own reset still
+  ahead. For the account in use it is your switch point, if you set that higher than 97 %: auto-switch
+  looks for another account only from there. The accounts that count are the one in use and
   those auto-switch may move to. Accounts you left out of auto-switch, accounts still signed in on the PC,
   and accounts that need sign-in, are on hold, are locked by Claude or are about to lose their login do
   not count. One account with room is enough to use nothing. So is one whose reading cannot say (none
-  yet, too old, incomplete): that account is read again first. The 5-hour limit never causes a reset.
+  yet, too old, incomplete): that account is read again first. A reading that shows an account out cannot
+  say either when it was taken before a limit reset used on that account through AccountDeck (by you or
+  automatically) or in the 10 minutes after it, because usage can lag behind a reset. A limit that refills
+  by itself within 10 minutes is waited for. The 5-hour limit never causes a reset.
 - **Which.** A reset fits when the account's list would let you use it now and it refills every limit that
   holds that account back: a Fable reset when only Fable's limit is out, a weekly or full reset when the
   week is. The account in use comes first, so your terminals stay where they are. Otherwise AccountDeck
@@ -491,12 +495,14 @@ are narrow:
   auto-switch's order, and auto-switch moves the terminals there once a reading shows the room. An account
   you left out of auto-switch is never reset. Codex and Claude Desktop resets are never used automatically.
 - **One at a time.** AccountDeck looks once more right before it sends, as it does for your own use, and
-  checks again that every account is still out. It uses no further reset while another action runs, while
-  the outcome of any use is not known, before a reading of the account shows the refill, within an hour of
+  checks again that every account is still out, that the three settings are still on and that the reset
+  still refills what is out. It uses no further reset while another action runs, while the outcome of a use
+  on any Claude account is not known, before a reading of the account shows the refill, within an hour of
   the last automatic reset, or within 10 minutes (doubling to an hour) of a try that used nothing.
-- **When it stops itself.** If a reading taken 10 minutes or more after a reset still shows that limit at
-  97 % or more, AccountDeck uses no more limit resets by itself and raises the alert **Automatic limit
-  resets stopped**. Turn the setting off and on to start again.
+- **When it stops itself.** If a reading taken 10 minutes or more after a reset still shows that limit
+  out, AccountDeck uses no more limit resets by itself and raises the alert **Automatic limit
+  resets stopped**. Turn the setting off and on to start again. A reset used before you turned the setting
+  off is still checked by the account's next readings, so turning it on later starts afresh.
 - **Telling you.** Each automatic use shows as a report in the dashboard, a line in Recent activity and a
   notification: "AccountDeck used one Fable reset on work by itself: every terminal account was at 97% or
   more." A try that used nothing is reported once, with the reason.

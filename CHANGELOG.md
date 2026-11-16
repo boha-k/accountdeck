@@ -10,10 +10,13 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 
 - **Use a limit reset when every terminal account is out**, a setting in Settings → Auto-Switch, off unless
   you turn it on. When every terminal account auto-switch could use is at 97 % or more of its weekly or Fable
-  weekly limit, AccountDeck uses one Claude Code limit reset by itself: on the account in use when it holds
-  one that fits (a Fable reset when only Fable is out, a weekly one when the week is), else on another
-  account, where auto-switch then moves the terminals. One at a time: never while another action runs or an
-  outcome is not known, never before a reading shows the refill, and at most one an hour. If a reset does
+  weekly limit (the account in use: at your switch point, when you set that higher), AccountDeck uses one
+  Claude Code limit reset by itself: on the account in use when it holds one that fits (a Fable reset when
+  only Fable is out, a weekly one when the week is), else on another account, where auto-switch then moves
+  the terminals. One at a time: never while another action runs or an outcome is not known, never before a
+  reading shows the refill, and at most one an hour. Never for a limit that refills by itself within 10
+  minutes, and never by a reading taken before a limit reset you or AccountDeck used on that account, or in
+  the 10 minutes after it. If a reset does
   not refill its limit, automatic resets stop with an alert until you turn the setting off and on. Each use
   is told as a report, a line in Recent activity and a notification. Codex and Claude Desktop resets are
   never used automatically, and an account you left out of auto-switch is never reset.
@@ -33,7 +36,9 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   at all is left for one whose week has room.
 - Your own choice stands. After **Undo**, or a switch you make in AccountDeck, auto-switch leaves the terminals
   on that account for 2 hours even past your threshold, until a reading says 99 %. A limit reached or a login
-  that ends still moves them. Before, the threshold switch could reverse your choice on the next check.
+  that ends still moves them, and your choice ends there: it does not hold the terminals on that account when
+  auto-switch brings them back to it later. Before, the threshold switch could reverse your choice on the next
+  check.
 - The early switch ("Use weekly allowance before it resets") only moves to an account whose week ends more
   than an hour sooner, and never within 2 hours of another automatic switch. Two accounts with the same reset
   time no longer trade places.
@@ -43,23 +48,23 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 ### Fixed
 
 - A terminal switch that runs while `/login` is half done (Claude Code has the new account's login but still
-  names the old account) no longer saves the new login under the old account. The switch waits instead, so
-  neither account needs a new sign-in.
+  names the old account) no longer saves the new login under the old account. The switch stops with nothing
+  changed and says so (auto-switch tries again by itself), so neither account needs a new sign-in.
 - Recover no longer gets stuck after an interrupted Codex switch when Codex renewed or changed its sign-in
-  afterwards. Codex keeps the sign-in it has now, AccountDeck saves it, and Codex and Claude Desktop switches
-  work again. Before, every Recover said "Recovery paused", and the account Codex had before could end up
-  needing a new sign-in.
+  afterwards. Codex keeps the sign-in it has now, AccountDeck saves it (or says that Codex holds none it can
+  save), and Codex and Claude Desktop switches work again. Before, every Recover said "Recovery paused", and
+  the account Codex had before could end up needing a new sign-in.
 - Pressing Recover for Claude Desktop after an earlier Recover was cut short (AccountDeck quit or crashed in the
   middle) no longer leaves Claude signed in to the account the switch was moving to.
 - A Claude Desktop switch, Add or Recover now stops with nothing changed when Claude is opened again while
   AccountDeck is working, instead of replacing Claude's sign-in files while it runs.
 - When Claude or OpenAI asks AccountDeck to wait before checking usage again, the wait is now at most an hour
   and 15 minutes. One answer asking for years could pause an account's checks, its Refresh and auto-switch to
-  it for that long. A longer pause saved by an earlier version ends at the next start.
+  it for that long. A longer pause saved by an earlier version is cut to that at the next start.
 - Terminal accounts now show "refilled" and send the refill alert when a limit resets, like Claude Desktop and
   Codex accounts.
-- A saved terminal account can be removed while Claude Code is signed out. Before, Remove failed with "The
-  terminal login file is missing."
+- A saved terminal account can be removed while Claude Code is signed out (all but the one still shown as in
+  use). Before, Remove failed with "The terminal login file is missing."
 - The dashboard no longer shows two terminal accounts in use, or none, when a switch or a Remove ends at the
   moment the page is updated.
 - With three or more Codex accounts, usage checks of Codex accounts waiting their turn no longer hold up the
