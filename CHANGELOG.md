@@ -28,6 +28,10 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 - When Claude or OpenAI asks AccountDeck to wait before checking usage again, the wait is now at most an hour
   and 15 minutes. One answer asking for years could pause an account's checks, its Refresh and auto-switch to
   it for that long. A longer pause saved by an earlier version ends at the next start.
+- Terminal accounts now show "refilled" and send the refill alert when a limit resets, like Claude Desktop and
+  Codex accounts.
+- A saved terminal account can be removed while Claude Code is signed out. Before, Remove failed with "The
+  terminal login file is missing."
 
 ## [2.2.0] - 2026-11-15
 

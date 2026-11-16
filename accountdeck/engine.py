@@ -1270,8 +1270,8 @@ class Engine:
                         self.bump()
                         return
                     with self.cli.gate(key):
-                        live = self.cli.adapter.current()
-                        if live["identity"] == account["identity"]:
+                        # Signed out of Claude Code (None): no login the mirror would save again, so none is in use.
+                        if self.cli.adapter.active_identity() == account["identity"]:
                             raise DeckError("The account in use by your terminals cannot be removed.", "invalid")
                         self.accounts.remove(key)
                 self.scheduler.forget(key)
