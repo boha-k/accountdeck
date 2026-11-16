@@ -36,6 +36,9 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   moment the page is updated.
 - With three or more Codex accounts, usage checks of Codex accounts waiting their turn no longer hold up the
   check of the account your terminals use, which auto-switch decides on.
+- After a Claude Desktop switch that could not be confirmed at once, AccountDeck keeps checking which account
+  Claude opened even when another job (an automatic terminal switch, say) runs meanwhile. Before, that job
+  ended the check, so a wrong account was never reported and Recover was never offered.
 
 ## [2.2.0] - 2026-11-15
 
