@@ -17,7 +17,9 @@ Codex's count comes with every reading (`account/rateLimits/read`); the use goes
 (`Codex.reset_session`). Claude's needs a separate read (`?cedar_ember=1&skip_spend=1`), made only straight after a
 successful ordinary read of that account, on the route that read used, at most hourly (every 15 minutes when the user
 asked), never with a token that would need renewing, and after a 401, 403 or 429 or three failures in a row not for
-6 hours; the setting `claude_resets` turns it off. Its use is one POST through the OAuth route only.
+6 hours; the setting `claude_resets` turns it off. Its use is one POST through the OAuth route only. The read on the
+OAuth route and the claim go out with Claude Code's User-Agent (providers.base.is_reset_request): Anthropic lists an
+account's grants to no other client there.
 """
 from __future__ import annotations
 
@@ -100,8 +102,8 @@ CLAUDE_EFFECT = ("The selected reset restores the allowance described above. A F
                  "allowance spent on Fable. The day the weekly limits reset stays the same.")
 CLAUDE_EXTRA_WARNING = "A limit reset does not refund extra usage already billed."
 # Said on every Claude plan: who sends the request, and where Anthropic's own button is.
-CLAUDE_SENDER_WARNING = ("AccountDeck sends this request itself with this account's sign-in. Anthropic's own button for "
-                         "it is on claude.ai, under Settings > Usage.")
+CLAUDE_SENDER_WARNING = ("AccountDeck sends this request itself, as Claude Code, with this account's sign-in. "
+                         "Anthropic's own button for it is on claude.ai, under Settings > Usage.")
 CLAUDE_NEEDS_LIMIT_WARNING = "Some limit resets work only once a limit they refill is reached."
 DOUBT_WARNING = ("The outcome of an earlier use is not known yet. Using it again sends the same request, so it cannot "
                  "be used twice.")

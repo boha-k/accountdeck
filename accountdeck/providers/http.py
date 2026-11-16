@@ -1,5 +1,6 @@
-"""Provider HTTP (A1, §5.10): one request with classification, an honest user agent and the safe-mode host gate,
-and `head`, the bodiless request of the update check (accountdeck/updates.py).
+"""Provider HTTP (A1, §5.10): one request with classification, AccountDeck's own user agent (Claude Code's on Claude's
+resets read and claim only, `base.is_reset_request`) and the safe-mode host gate, and `head`, the bodiless request of
+the update check (accountdeck/updates.py).
 
 In safe mode (tests, demos) a request may only reach an in-process loopback server registered with
 `register_test_host`; everything else raises SafetyViolation before a socket is opened.
@@ -8,6 +9,8 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
+from pathlib import Path
 import re
 import socket
 import threading
@@ -18,7 +21,8 @@ import urllib.request
 
 from .. import diagnostics
 from ..config import DEFAULT_PORT, V1_PORT, SafetyViolation, safe_mode
-from .base import OAUTH_BETA, OAUTH_HOST, OAUTH_PATH, RESET_CLAIM_PATH, USER_AGENT
+from .base import (CLAUDE_CODE_AGENT, CLAUDE_CODE_VERSION, OAUTH_BETA, OAUTH_HOST, OAUTH_PATH, RESET_CLAIM_PATH,
+                   USER_AGENT, is_reset_request)
 from .errors import (ProviderError, classify_http, error_type, header, rate_limit_wait, retry_after_seconds,
                      token_description)
 
@@ -31,6 +35,7 @@ TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 _LOOPBACK = ("127.0.0.1", "::1")
 _CONTROLLED = frozenset({"user-agent", "authorization", "cookie", "anthropic-beta"})
 _ORG_IN_PATH = re.compile(r"(/api/organizations/)[^/]+")     # a logged path never names the organisation
+_VERSION = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,6}")
 
 _test_hosts: set[str] = set()
 _test_hosts_lock = threading.Lock()
@@ -127,21 +132,35 @@ def unregister_test_host(host_port):
 
 
 def request_headers(url, *, headers=None, token=None, cookie=None):
-    """The headers sent to `url`: the caller's, except that the user agent, credentials and the
-    OAuth beta flag (api.anthropic.com OAuth endpoints only) are always decided here."""
+    """The headers sent to `url`: the caller's, except that the user agent (AccountDeck's own, Claude Code's on
+    Claude's resets read and claim only), credentials and the OAuth beta flag (api.anthropic.com OAuth endpoints
+    only) are always decided here."""
     parts = urllib.parse.urlsplit(url)
     result = {"Accept": "application/json"}
     result.update({key: value for key, value in (headers or {}).items() if key.lower() not in _CONTROLLED})
-    result["User-Agent"] = USER_AGENT
+    host = (parts.hostname or "").lower()
+    result["User-Agent"] = (CLAUDE_CODE_AGENT.format(version=claude_code_version())
+                            if is_reset_request(host, parts.path, parts.query) else USER_AGENT)
     # The OAuth endpoints, and the one claim of a limit reset (resets.py), which Claude Code sends with the same flag.
-    if (parts.hostname or "").lower() == OAUTH_HOST and (parts.path.startswith(OAUTH_PATH)
-                                                         or RESET_CLAIM_PATH.fullmatch(parts.path)):
+    if host == OAUTH_HOST and (parts.path.startswith(OAUTH_PATH) or RESET_CLAIM_PATH.fullmatch(parts.path)):
         result["anthropic-beta"] = OAUTH_BETA
     if token:
         result["Authorization"] = "Bearer " + token
     if cookie:
         result["Cookie"] = cookie
     return result
+
+
+def claude_code_version():
+    """The installed Claude Code's version, from the name of the file ~/.local/bin/claude links to (nothing run), or
+    CLAUDE_CODE_VERSION when there is none or in safe mode."""
+    if safe_mode():
+        return CLAUDE_CODE_VERSION
+    try:
+        name = Path(os.readlink(Path.home() / ".local" / "bin" / "claude")).name
+    except OSError:
+        return CLAUDE_CODE_VERSION
+    return name if _VERSION.fullmatch(name) else CLAUDE_CODE_VERSION
 
 
 def request(method, url, *, headers=None, timeout=DEFAULT_TIMEOUT, cookie=None, token=None,

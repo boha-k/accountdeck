@@ -30,6 +30,18 @@ WEB_ORIGIN = "https://claude.ai"
 WEB_ORGS_URL = "https://claude.ai/api/organizations"
 WEB_PLATFORM = "web_claude_ai"
 USER_AGENT = f"AccountDeck2/{__version__} (+local)"
+# Claude's resets read and claim go out under Claude Code's name: Anthropic answers any other client of the OAuth
+# route `ineligible_reason: "surface"` and lists no grants (tested 2026-11-16: the same token and read, seconds
+# apart, got "surface" with USER_AGENT and the account's grants with this one). Every other request keeps USER_AGENT.
+# The version is the installed Claude Code's (~/.local/bin/claude links to …/versions/<version>), else this one.
+CLAUDE_CODE_VERSION = "2.1.325"
+CLAUDE_CODE_AGENT = "claude-cli/{version} (external, cli)"
+
+
+def is_reset_request(host, path, query):
+    """Whether a request is Claude's resets read (the usage route with RESETS_QUERY) or its claim."""
+    return host == OAUTH_HOST and ((path == "/api/oauth/usage" and "?" + query == RESETS_QUERY)
+                                   or RESET_CLAIM_PATH.fullmatch(path) is not None)
 
 
 class CredentialState(str, Enum):
