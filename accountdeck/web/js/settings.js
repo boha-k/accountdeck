@@ -214,7 +214,8 @@
     // Automatic limit resets: the service's words when it stopped itself, else what it does and what it needs.
     const resetting = (A.provider(state) || {}).auto_reset || {};
     const needs = prefs.cli_autoswitch === false || prefs.claude_resets === false;
-    const resetHint = resetting.stopped || (needs ? `${S.autoResetHint} ${S.autoResetNeeds}` : S.autoResetHint);
+    const resetHint = resetting.stopped || [S.autoResetHint, threshold > 97 ? fill(S.autoResetPoint, { percent: threshold }) : null,
+      S.autoResetOnce, needs ? S.autoResetNeeds : null].filter(Boolean).join(' ');
     return [
       group(null, [
         serverSwitch(prefs, 'cli_autoswitch', S.auto, S.autoHint),

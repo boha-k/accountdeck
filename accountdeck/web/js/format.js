@@ -448,7 +448,10 @@
       early: 'Use weekly allowance before it resets', earlyHint: 'Switches early to an account whose unused weekly limit is about to reset.',
       // Automatic limit resets (the auto_reset setting; providers.claude_cli.auto_reset says why they stopped).
       autoReset: 'Use a limit reset when every terminal account is out',
-      autoResetHint: 'Off unless you turn it on. When every terminal account auto-switch could use is at 97% or more of its weekly or Fable 5.1 weekly limit (the account in use: at your switch point, if that is higher), AccountDeck uses one Claude limit reset by itself: on the account in use when it holds one that fits, else on another account. One at a time, never for a limit that refills within 10 minutes, and it tells you each time. A limit reset cannot be taken back.',
+      autoResetHint: 'When every terminal account auto-switch could use is at 97% or more of its weekly or Fable 5.1 weekly limit, AccountDeck uses one Claude limit reset by itself: on the account in use when it holds one that fits, else on another account.',
+      // Said with a switch point above 97 %: the account in use is out only from there (reset_auto.bar).
+      autoResetPoint: 'The account in use counts from your switch point, {percent}%.',
+      autoResetOnce: 'One at a time, and it tells you each time. A limit reset cannot be taken back.',
       autoResetNeeds: 'It works only with “Switch accounts automatically” and “Read Claude limit resets” on.',
       alertsOn: 'Show alerts in AccountDeck', alertsOnHint: 'Low limits, refills and switches appear on this page.',
       browser: 'Browser notifications', browserOn: 'On in this browser.', browserOff: 'Off. The browser asks for your permission once.',
