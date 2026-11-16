@@ -173,6 +173,9 @@ class RefreshScheduler:
             known = {t.id for t in targets}
             for key in [key for key in self._plans if key not in known]:
                 del self._plans[key]
+            # One Codex read at a time (`_read`): another would only hold a worker waiting for it, and with three
+            # waiting no read could start, the terminals' account in use included. It stays due for a later tick.
+            codex = any(t.provider == "codex" and t.id in self._plans and self._plans[t.id].running for t in targets)
             for target in targets:
                 if target.provider == "claude_cli" and not target.active and sum(
                         t.provider == "claude_cli" and not t.active for t in ready) >= 2:
@@ -202,6 +205,10 @@ class RefreshScheduler:
                         plan.signal = False
                         continue
                     picked.add(gkey)
+                if target.provider == "codex":
+                    if codex:
+                        continue
+                    codex = True
                 ready.append(target)
         return ready
 

@@ -34,6 +34,8 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   terminal login file is missing."
 - The dashboard no longer shows two terminal accounts in use, or none, when a switch or a Remove ends at the
   moment the page is updated.
+- With three or more Codex accounts, usage checks of Codex accounts waiting their turn no longer hold up the
+  check of the account your terminals use, which auto-switch decides on.
 
 ## [2.2.0] - 2026-11-15
 
