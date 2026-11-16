@@ -71,7 +71,6 @@ main() {
     if [ "$manage" = true ]; then
         launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
     fi
-    rm -f "$agent"
 
     local waited=0
     while pgrep -U "$(id -u)" -f -- "$appdir/run.py" >/dev/null 2>&1; do
@@ -79,6 +78,8 @@ main() {
         sleep 1
         waited=$((waited + 1))
     done
+    # Only now: an uninstall that stops above leaves AccountDeck installed, and it still opens at login.
+    rm -f "$agent"
 
     if [ -e "$app" ]; then
         if [ "$manage" = true ] && [ -x "$LSREGISTER" ]; then

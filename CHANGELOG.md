@@ -45,6 +45,8 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 - If AccountDeck quits or crashes during a Codex Add, the sign-in that finished meanwhile is saved at the next
   start and its unencrypted copy is deleted. Before, that copy stayed in AccountDeck's data folder and the
   sign-in was not saved.
+- `uninstall.sh` stopped because AccountDeck was still running no longer turns off Open at login: the app stays
+  installed and still opens at login.
 
 ## [2.2.0] - 2026-11-15
 
