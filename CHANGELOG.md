@@ -39,6 +39,9 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 - After a Claude Desktop switch that could not be confirmed at once, AccountDeck keeps checking which account
   Claude opened even when another job (an automatic terminal switch, say) runs meanwhile. Before, that job
   ended the check, so a wrong account was never reported and Recover was never offered.
+- Importing accounts from your PC now says which of this Mac's settings will change to match the PC, before
+  you import and once it is done, for example "switching accounts automatically (on)". Before, a Mac with
+  auto-switch off could come out of an import with it on, without a word.
 
 ## [2.2.0] - 2026-11-15
 
