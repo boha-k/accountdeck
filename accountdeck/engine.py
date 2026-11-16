@@ -48,6 +48,7 @@ from .providers import make_providers
 from .providers.antigravity import Antigravity
 from .providers.claude_cli import ClaudeCLI, expires
 from .providers.codex import Codex
+from .providers.errors import RATE_LIMIT_MARGIN, RETRY_AFTER_CAP
 from .providers.status import ObservedStatus, StatuspageStatus, StatuspageSummary
 from . import runway
 from .rules import REFILL_KEEP
@@ -199,7 +200,8 @@ class Engine:
         self.identity_known = {name: False for name in self.providers}
         self.background_verifiers = []
         self.closers = []                    # called once by stop(), e.g. a Codex sign-in helper
-        self.scheduler = RefreshScheduler(self._read_tracked, inline=inline)
+        # The page hears of a read's end too: the state built at the read's own bump still shows it running.
+        self.scheduler = RefreshScheduler(self._read_tracked, inline=inline, done=self.bump)
         self.accounts = AccountService(self.store, self.vault, self.providers, self.prefs, clock=clock,
                                        observed=self.observed, levels=self.levels,
                                        lock_for=self.scheduler.account_lock,
@@ -216,7 +218,9 @@ class Engine:
             self.cli.adopt_stashes()
             self.cli.restore_enrollment()
         if self.owns_login:
+            self.store.cap_pauses(RETRY_AFTER_CAP + RATE_LIMIT_MARGIN)
             self.accounts.settle_renewals()
+            self.accounts.rescue_sign_ins()
             try:
                 self.agy.recover_at_start()
             except Exception as exc:     # Claude's and Codex's accounts must still start
@@ -536,6 +540,7 @@ class Engine:
             return result
         finally:
             self._record_read(provider, result)
+            self.bump()                      # the page sees the new reading now, not after Claude's resets read
             self.resets.after_read(key, provider, result)      # Claude's resets read when due; it never raises
             self._watch_shape(provider, key, row)
             self._read_once.add(key)
@@ -914,14 +919,17 @@ class Engine:
         now = self.clock()
         settings = self.prefs.public()
         machine, slow = self._observe(), self._refresh_slow(now)
-        rows = self.store.accounts()
+        # One look at the accounts and at who is signed in for the whole state: a switch or a Remove that ends on
+        # `ad2-ops` meanwhile would otherwise give it two accounts in use, or none, or an auto-switch order that
+        # misses an account. The next state shows the change.
+        rows, identities = self.store.accounts(), dict(self.active_identity)
         self._counts = self._count_accounts(rows)
         status = {name: self.status(name, now) for name in self.providers}
         refills = {}
         for refill in self.store.refills(now - REFILL_KEEP):
             refills.setdefault(refill["account"], {})[refill["window"]] = {
                 "at": refill["reset_at"], "confirmed": refill["confirmed_at"], "from": refill["previous_used"]}
-        accounts = [self._raw_account(row, now, status, refills.get(row["id"], {})) for row in rows]
+        accounts = [self._raw_account(row, now, status, refills.get(row["id"], {}), identities) for row in rows]
         accounts += self._unsaved_rows(now, status)
         runner = self.runner.snapshot()
         pending = runner["pending"]
@@ -938,7 +946,8 @@ class Engine:
                 "switching": bool(pending and pending["provider"] == name and pending["phase"] not in TERMINAL_PHASES),
                 "paused": bool(self.prefs.get("refresh_paused")) or self.scheduler.provider_pause.get(name, False)}
         providers["claude"].update(data_folder=slow["data_folder"], folder_warning=None)
-        providers["claude_cli"].update(autoswitch=cli_auto.state(self), enrollment=copy.deepcopy(self.cli.phase),
+        providers["claude_cli"].update(autoswitch=cli_auto.state(self, rows, identities),
+                                        enrollment=copy.deepcopy(self.cli.phase),
                                         readonly_reason=self.cli.adapter.readonly_reason,
                                         usage_shape=shape_change(self.store.setting("usage_shapes"), "claude_cli", now))
         providers["claude_cli"]["runway"] = self._runway
@@ -1028,9 +1037,9 @@ class Engine:
                 "paused": bool(self.prefs.get("refresh_paused")) or self.scheduler.provider_pause.get("antigravity", False),
                 **block}
 
-    def _raw_account(self, row, now, status, refills):
+    def _raw_account(self, row, now, status, refills, identities):
         name, key, flags = row["provider"], row["id"], row["flags"]
-        active = row["identity"] == self.active_identity.get(name)
+        active = row["identity"] == identities.get(name)
         error = None
         if row["error"]:
             error = {"code": row["error_code"] or "network", "message": row["error"],
@@ -1268,8 +1277,8 @@ class Engine:
                         self.bump()
                         return
                     with self.cli.gate(key):
-                        live = self.cli.adapter.current()
-                        if live["identity"] == account["identity"]:
+                        # Signed out of Claude Code (None): no login the mirror would save again, so none is in use.
+                        if self.cli.adapter.active_identity() == account["identity"]:
                             raise DeckError("The account in use by your terminals cannot be removed.", "invalid")
                         self.accounts.remove(key)
                 self.scheduler.forget(key)

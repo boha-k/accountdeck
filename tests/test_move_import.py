@@ -67,7 +67,11 @@ class MoveImportTests(SyntheticTestCase):
         with self.assertRaises(DeckError):
             self.import_(path, "a wrong passphrase!")
         self.assertEqual(self.engine.store.accounts(), [])                    # a wrong passphrase writes nothing
+        # The settings the PC's replace are named before anything changes, and once they have.
+        changed = ["the switch point", "your own account order"]
+        self.assertEqual(move_import.preview(self.engine, str(path), PASSPHRASE)["settings"], changed)
         result = self.import_(path)
+        self.assertIn(f"These settings now match the PC: {' and '.join(changed)}.", self.engine.runner.report()["summary"])
         self.assertTrue(result["complete"], result)
         header, payload = mb.open_bundle(path.read_bytes(), PASSPHRASE, min_scrypt_n=SCRYPT_N)
         self.assertEqual(result["code"], mb.code_for_imported(header, None, header.account_ids))

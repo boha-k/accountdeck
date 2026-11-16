@@ -51,7 +51,12 @@ FALLBACK_AGE = 24 * HOUR
 
 
 def number(value):
-    return value if type(value) in (int, float) and math.isfinite(value) else None
+    """`value` when it is a finite int or float, else None: a whole number too large for a float (a damaged setting,
+    an absurd server value) is none either, rather than an OverflowError at every check."""
+    try:
+        return value if type(value) in (int, float) and math.isfinite(value) else None
+    except OverflowError:
+        return None
 
 
 def reading_age(account, now):

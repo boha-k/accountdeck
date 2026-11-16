@@ -65,13 +65,16 @@ def _forecast(engine, row, now):
     return result
 
 
-def inputs(engine):
+def inputs(engine, accounts=None, identities=None):
+    """The terminal rows the rule decides on; `accounts` and `identities` (the store's rows and who is signed in)
+    when the caller already looked (Engine._build), so its state agrees with itself."""
     rows = []
     now = engine.clock()
-    for row in engine.store.accounts():
+    identities = engine.active_identity if identities is None else identities
+    for row in engine.store.accounts() if accounts is None else accounts:
         if row["provider"] != "claude_cli":
             continue
-        active = row["identity"] == engine.active_identity.get("claude_cli")
+        active = row["identity"] == identities.get("claude_cli")
         rows.append({"id": row["id"], "label": row["label"], "active": active,
                      "forecast": _forecast(engine, row, now) if active else {},
                      "owner": row["owner"],
@@ -142,10 +145,11 @@ def _reads_first(result, last_good_at, now):
     return result["read_first"] and (last_good_at is None or now - last_good_at > FRESH_READ)
 
 
-def state(engine):
+def state(engine, accounts=None, identities=None):
     """The state's `providers.claude_cli.autoswitch` block: the decision and the order under each mode
-    (one pass over the store, evaluated four times). `paused` names what stops auto-switch now."""
-    settings, rows = engine.prefs.public(), inputs(engine)
+    (one pass over the store, or `inputs`' `accounts` and `identities`, evaluated four times). `paused` names
+    what stops auto-switch now."""
+    settings, rows = engine.prefs.public(), inputs(engine, accounts, identities)
     history, now = engine.store.setting("cli_history", {}), engine.clock()
     result = cli_policy.evaluate(rows, settings, history, now)
     reason = paused(engine)

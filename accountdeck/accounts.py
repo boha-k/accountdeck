@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import replace
+import json
 import threading
 import time
 
 from . import diagnostics, intel
 from .contract import ERROR_CODES, PROVIDER_FAILURES, UNSAVED_IDS
 from .core import DeckError, FrozenAccountError, is_frozen
+from .platform.facts_mac import remove_work_directory
 from .providers import CredentialState, OutcomeLog
 from .providers.codex import fingerprint, freshness, identity_key, refresh_due, token_state
 from .resets import offer as offer_resets_read
@@ -529,6 +531,29 @@ class AccountService:
         except Exception as exc:
             diagnostics.log_exception("codex.tidy_failed", exc)
 
+    def rescue_sign_ins(self):
+        """Once at start: a Codex Add cut short (a crash, a forced quit) leaves its sign-in folder behind
+        (switch_codex.Enrollment), and any sign-in that finished there sits in it in the clear. Each is saved as its
+        account, as ending an Add does, or kept encrypted in quarantine when it cannot be; then the folder is
+        removed. A folder whose sign-in could be kept neither way stays for the next start; nothing stops the start."""
+        codex = self.providers["codex"]
+        for home in sorted(codex.workspace.glob("login-*")):
+            try:
+                auth, saved = home / "auth.json", None
+                if auth.exists():
+                    raw = auth.read_bytes()
+                    try:
+                        profile = json.loads(raw)
+                        self.save("codex", profile, codex.identity(profile), source="login", owner="v2")
+                        saved = True
+                    except Exception:
+                        self.vault.quarantine("codex-login", raw)
+                        saved = False
+                remove_work_directory(home, codex.workspace)
+                diagnostics.log("codex.login_left", lvl="warning", saved=saved)
+            except Exception as exc:
+                diagnostics.log_exception("codex.login_left_kept", exc)
+
     # ---- what the snapshot shows about a saved account ----
     def series(self, account, now):
         """({window: readings in its current reset epoch}, trend points) of a saved account, worked out
@@ -556,13 +581,15 @@ class AccountService:
 
     def touch_active(self, provider, identity, now):
         """Notes that a saved account is the signed-in one (`flags.last_active_at`, renewed hourly):
-        the dashboard's "unused for N days" hint reads it."""
-        account = self.store.find(provider, identity)
-        if account is None or is_frozen(account):
-            return
-        last = account["flags"].get("last_active_at")
-        if last is None or now - last >= ACTIVE_TOUCH:
-            self.store.update(account["id"], flags={**account["flags"], "last_active_at": now})
+        the dashboard's "unused for N days" hint reads it. The flags are read and written back under the store's
+        lock, which every write takes, so no flag another thread writes in between is lost."""
+        with self.store.lock:
+            account = self.store.find(provider, identity)
+            if account is None or is_frozen(account):
+                return
+            last = account["flags"].get("last_active_at")
+            if last is None or now - last >= ACTIVE_TOUCH:
+                self.store.update(account["id"], flags={**account["flags"], "last_active_at": now})
 
     # ---- the unsaved signed-in account (§9.4) ----
     def sense_unsaved(self, provider, identity):

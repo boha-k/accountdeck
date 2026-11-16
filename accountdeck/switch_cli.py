@@ -305,6 +305,13 @@ def perform(service, key):
                             raise
                         previous = known["id"]  # blank revoked stub: retain the last encrypted generation
                     else:
+                        # A /login writes its token before `.claude.json` names the new account: a token the
+                        # provider said is another account's is never filed under the one named. Only what
+                        # `mirror` already asked counts, so no network call runs under these locks; an owner not
+                        # known yet does not stop the switch (an outage of that endpoint would stop every one).
+                        if service.owners.get(outgoing["fingerprint"]) not in (None, outgoing["identity"]):
+                            raise DeckError("Claude Code's account and login disagree. Wait for sign-in to finish.",
+                                            "identity")
                         # Its cross-check refuses a login another record holds rather than wait for that key lock.
                         previous = service.save(outgoing, source="sync-back", drop=False)
                 composed = merge(target["credentials"], credentials)

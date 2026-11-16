@@ -42,8 +42,9 @@ ACCOUNTDECK_SAFE_MODE=1 "$PY" -E -s -m unittest discover -s tests -t .   # the t
 
 `tools/check.sh` runs lint, the unit tests in safe mode, a syntax check of the shell scripts, the
 dashboard's JavaScript and the workflow files, every demo scenario's state against the contract, and the
-shape of the `run.py --doctor` report. The JavaScript check needs `node` on your `PATH` and the workflow
-check needs `ruby` (macOS has one); without them, check.sh reports that part as skipped (CI runs both). It
+shape of the `run.py --doctor` report. The JavaScript check uses `node` when it is on your `PATH`, else the
+JavaScriptCore shell macOS has, and the workflow check needs `ruby` (macOS has one); without them, check.sh
+reports that part as skipped (CI runs both). It
 also checks that older releases can still open data this build used (see below) when their builds are at
 hand; 2.0.0 and 2.1.0 were released before this repository's history begins, so in a clone of it check.sh
 checks the available public releases and skips those two old builds. Extra arguments go to `unittest`, for example

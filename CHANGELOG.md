@@ -12,6 +12,51 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   request still names AccountDeck.
 - Keep the data saved by 2.2.0 as a synthetic fixture and test future updates against it, including Antigravity sign-ins.
 
+### Fixed
+
+- A terminal switch that runs while `/login` is half done (Claude Code has the new account's login but still
+  names the old account) no longer saves the new login under the old account. The switch waits instead, so
+  neither account needs a new sign-in.
+- Recover no longer gets stuck after an interrupted Codex switch when Codex renewed or changed its sign-in
+  afterwards. Codex keeps the sign-in it has now, AccountDeck saves it, and Codex and Claude Desktop switches
+  work again. Before, every Recover said "Recovery paused", and the account Codex had before could end up
+  needing a new sign-in.
+- Pressing Recover for Claude Desktop after an earlier Recover was cut short (AccountDeck quit or crashed in the
+  middle) no longer leaves Claude signed in to the account the switch was moving to.
+- A Claude Desktop switch, Add or Recover now stops with nothing changed when Claude is opened again while
+  AccountDeck is working, instead of replacing Claude's sign-in files while it runs.
+- When Claude or OpenAI asks AccountDeck to wait before checking usage again, the wait is now at most an hour
+  and 15 minutes. One answer asking for years could pause an account's checks, its Refresh and auto-switch to
+  it for that long. A longer pause saved by an earlier version ends at the next start.
+- Terminal accounts now show "refilled" and send the refill alert when a limit resets, like Claude Desktop and
+  Codex accounts.
+- A saved terminal account can be removed while Claude Code is signed out. Before, Remove failed with "The
+  terminal login file is missing."
+- The dashboard no longer shows two terminal accounts in use, or none, when a switch or a Remove ends at the
+  moment the page is updated.
+- With three or more Codex accounts, usage checks of Codex accounts waiting their turn no longer hold up the
+  check of the account your terminals use, which auto-switch decides on.
+- After a Claude Desktop switch that could not be confirmed at once, AccountDeck keeps checking which account
+  Claude opened even when another job (an automatic terminal switch, say) runs meanwhile. Before, that job
+  ended the check, so a wrong account was never reported and Recover was never offered.
+- Importing accounts from your PC now says which of this Mac's settings will change to match the PC, before
+  you import and once it is done, for example "switching accounts automatically (on)". Before, a Mac with
+  auto-switch off could come out of an import with it on, without a word.
+- If AccountDeck quits or crashes during a Codex Add, the sign-in that finished meanwhile is saved at the next
+  start and its unencrypted copy is deleted. Before, that copy stayed in AccountDeck's data folder and the
+  sign-in was not saved.
+- `uninstall.sh` stopped because AccountDeck was still running no longer turns off Open at login: the app stays
+  installed and still opens at login.
+- An account paused by a provider incident says so once on its row, not twice. A limit's countdown with no room
+  left ends in dots instead of stopping mid-word. The user guide now says the early switch is on by default.
+- Cancel pressed just as a job reaches a step that cannot be stopped now cancels the job, instead of being
+  accepted and then ignored.
+- An account's row stops saying it is being checked as soon as the check has ended, and a new reading shows
+  without waiting for Claude's limit resets to be read.
+- Terminal auto-switch keeps deciding when a stored number is far too large to use (a damaged setting or
+  reading), and noting which Claude Desktop or Codex account is in use no longer drops a note a usage check
+  wrote at the same moment.
+
 ## [2.2.0] - 2026-11-15
 
 The first public release. Installing it over 2.0.0 or 2.1.0 is an update that keeps every saved account.

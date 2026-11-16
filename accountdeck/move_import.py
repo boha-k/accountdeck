@@ -2,7 +2,7 @@
 
 Actions (engine `_do_*`, contract.ACTIONS):
 - `import-bundle-preview` {path, passphrase}: opens the bundle and says, per account, what an import would
-  do. Nothing is written.
+  do, and which of this Mac's settings the PC's would replace. Nothing is written.
 - `import-bundle` {path, passphrase, wait?}: ImportBundle, one step per account.
   Applying a bundle again is safe: every account is an identity-keyed upsert where the newer sign-in wins.
 - `import-bundle-dismiss` {bundle_id}: hides that import's confirmation code or failure list.
@@ -58,6 +58,19 @@ MIN_SCRYPT_N = mb.SCRYPT_MIN_N           # tests lower it together with the scry
 IMPORT_WAIT = 30.0                       # how long `import-bundle` waits for its operation before answering
 LEDGER_KEEP = 10
 SNAPSHOT_DAYS, READING_DAYS, REFILL_DAYS = 90, 7, 30   # what core.Store keeps
+# A main bundle's settings replace this Mac's (move_bundle.PORTABLE_SETTINGS). The preview and the result name each
+# one that changes, in these words and this order, so turning auto-switch on, say, never happens unsaid.
+SETTING_NAMES = {
+    "cli_autoswitch": "switching accounts automatically", "cli_threshold": "the switch point",
+    "cli_early_switch": "using weekly allowance before it resets", "cli_order": "the order of the next account",
+    "cli_manual_order": "your own account order", "pinned_model": "the pinned model",
+    "refresh_paused": "pausing usage checks", "confirm_when_idle": "asking before switching when Claude is idle",
+    "use_soon": "recommending limits that reset soon", "usage_display": "showing usage as used or left",
+    "sort": "the account sorting", "density": "cards or rows", "show_other_limits": "showing other limits",
+    "cookie_route": "Claude Desktop's web usage check", "alerts_enabled": "alerts",
+    "alert_low_left": "the low-limit alert level", "notifications": "notifications", "quiet_hours": "quiet hours",
+    "notify_reset_minutes": "the reset notice time", "log_level": "the log detail",
+}
 _DAY = 86400
 # Deferred conversion back-off (seconds). A missing key or template is cheap to look for again (no dialog);
 # a refused or locked Keychain read may have shown macOS's access dialog, so each such wait doubles.
@@ -150,6 +163,32 @@ def _template_ready(engine):
         return False
 
 
+def _settings_here(settings, mapping):
+    """The bundle's settings as the import writes them on this Mac: the manual order names this Mac's account ids
+    (`mapping`: the PC's id -> the id here) and leaves out the accounts that were not brought over."""
+    settings = copy.deepcopy(settings)
+    if "cli_manual_order" in settings:
+        settings["cli_manual_order"] = [mapping[key] for key in settings["cli_manual_order"] if key in mapping]
+    return settings
+
+
+def _settings_changed(engine, settings):
+    """The words for each of this Mac's settings that `settings` would change (SETTING_NAMES, in its order), a
+    switch's with what it becomes: "switching accounts automatically (on)"."""
+    current, order = engine.settings(), list(SETTING_NAMES)
+    names = []
+    for key in sorted(settings, key=lambda key: order.index(key) if key in order else len(order)):
+        value = settings[key]
+        if value != current.get(key):
+            name = SETTING_NAMES.get(key, key)
+            names.append(f"{name} ({'on' if value else 'off'})" if isinstance(value, bool) else name)
+    return names
+
+
+def _listed(names):
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 def preview(engine, path, passphrase):
     """The `import-bundle-preview` payload (see the module docstring). Writes nothing."""
     header, payload = open_file(path, passphrase, paths=engine.paths)
@@ -167,13 +206,19 @@ def preview(engine, path, passphrase):
                          "conflict": row["label"] if row is not None and action == "update" else None,
                          "reason": reason})
     refused = counts["refused"] > 0
+    # An account not saved here yet gets its id when it is imported: the PC's stands in for it, so a manual order
+    # that names one counts as changed.
+    mapping = {account["id"]: account["id"] if row is None else row["id"] for account, row, _action, _reason in plan}
+    settings = [] if refused else _settings_changed(
+        engine, _settings_here(config.validate_settings(payload["settings"]), mapping))
     log("move.import_preview", kind=header.kind, accounts=len(accounts), refused=counts["refused"])
     return {"bundle_id": header.bundle_id, "kind": header.kind, "created": header.created,
             "source_platform": payload["source_platform"], "accounts": accounts, "counts": counts,
-            "refused": refused, "message": _preview_message(header.kind, counts, refused)}
+            "refused": refused, "settings": settings,
+            "message": _preview_message(header.kind, counts, refused, settings)}
 
 
-def _preview_message(kind, counts, refused):
+def _preview_message(kind, counts, refused, settings):
     if refused:
         return (f"{_count(counts['refused'], 'account')} in this hand-over bundle {_verb(counts['refused'], 'is')} "
                 "not waiting on this Mac. Import the main move bundle first; nothing will be imported.")
@@ -189,6 +234,8 @@ def _preview_message(kind, counts, refused):
     if counts["deferred"]:
         parts.append(f"Claude Desktop is not set up on this Mac yet, so {_count(counts['deferred'], 'Claude Desktop account')} "
                      "will finish importing once you open it here.")
+    if settings:
+        parts.append(f"These settings on this Mac will change to match the PC: {_listed(settings)}.")
     return " ".join(parts)
 
 
@@ -218,7 +265,7 @@ class ImportBundle(Operation):
     def run(self):
         began = time.monotonic()
         engine, header = self.engine, self.header
-        stored, failures, mapping = set(), [], {}
+        stored, failures, mapping, changed = set(), [], {}, []
         counts = dict.fromkeys(OUTCOMES, 0)
         code = None
         try:
@@ -240,10 +287,8 @@ class ImportBundle(Operation):
                               status=None if history else "warning")
             with self.step("finish"):
                 if not failures:
-                    settings = copy.deepcopy(self._settings)
-                    if "cli_manual_order" in settings:
-                        settings["cli_manual_order"] = [mapping[key] for key in settings["cli_manual_order"]
-                                                        if key in mapping]
+                    settings = _settings_here(self._settings, mapping)
+                    changed = _settings_changed(engine, settings)
                     # Persist (one transaction) before updating the preference cache, so a failed
                     # write cannot look like an unchanged setting on the retry.
                     engine.store.set_settings(settings)
@@ -257,7 +302,7 @@ class ImportBundle(Operation):
         finally:
             self._plan = None        # drops the decrypted payload
             self._settings = None
-        self.report["summary"] = _summary(header.kind, counts, failures, code)
+        self.report["summary"] = _summary(header.kind, counts, failures, code, changed)
         log("move.import_done", kind=header.kind, stored=len(stored), failed=len(failures),
             deferred=counts["deferred"], on_pc=counts["on_pc"], complete=code is not None,
             ms=round((time.monotonic() - began) * 1000))
@@ -994,8 +1039,9 @@ def _verb(number, verb):
     return {"was": ("was", "were"), "is": ("is", "are")}[verb][number != 1]
 
 
-def _summary(kind, counts, failures, code):
-    """The operation's summary, which the engine also files as an event: never the code."""
+def _summary(kind, counts, failures, code, changed=()):
+    """The operation's summary, which the engine also files as an event: never the code. `changed` names the
+    settings that now match the PC's."""
     stored = sum(counts[key] for key in ("new", "updated", "filled", "kept", "deferred"))
     if kind == "handover":
         text = f"Took over {_count(stored, 'account')} handed over from the PC."
@@ -1008,4 +1054,6 @@ def _summary(kind, counts, failures, code):
         return f"{text} {_count(len(failures), 'account')} could not be imported. {CANCEL_HINT}"
     if counts["deferred"]:
         text += " " + deferred_message(counts["deferred"])
+    if changed:
+        text += f" These settings now match the PC: {_listed(list(changed))}."
     return text + (" The confirmation code is shown on the dashboard." if code else "")

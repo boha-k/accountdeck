@@ -1111,6 +1111,14 @@ class Store:
             self.db.commit()
         return cursor.rowcount == 1
 
+    def cap_pauses(self, longest):
+        """No account's usage checks stay paused for more than `longest` seconds from now: a pause saved from a
+        provider's wait before such waits were capped (errors.rate_limit_wait) ends then."""
+        until = self.clock() + longest
+        with self.lock:
+            self.db.execute("UPDATE accounts SET paused_until=? WHERE paused_until > ?", (until, until))
+            self.db.commit()
+
     # ---- settings and events ----
     def setting(self, key, default=None):
         with self.lock:
