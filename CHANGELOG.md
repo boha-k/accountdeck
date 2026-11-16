@@ -21,6 +21,10 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   afterwards. Codex keeps the sign-in it has now, AccountDeck saves it, and Codex and Claude Desktop switches
   work again. Before, every Recover said "Recovery paused", and the account Codex had before could end up
   needing a new sign-in.
+- Pressing Recover for Claude Desktop after an earlier Recover was cut short (AccountDeck quit or crashed in the
+  middle) no longer leaves Claude signed in to the account the switch was moving to.
+- A Claude Desktop switch, Add or Recover now stops with nothing changed when Claude is opened again while
+  AccountDeck is working, instead of replacing Claude's sign-in files while it runs.
 
 ## [2.2.0] - 2026-11-15
 

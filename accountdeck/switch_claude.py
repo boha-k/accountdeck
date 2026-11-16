@@ -48,6 +48,7 @@ LOGIN_BUSY_MESSAGE = "Finish or cancel the current sign-in first."
 NO_APP_MESSAGE = ("AccountDeck cannot find Claude in Applications, so it left Claude alone. "
                   "Install Claude in the Applications folder, then try again.")
 REOPENED = "Claude was reopened with the same account."
+STARTED_AGAIN = "Claude was opened again, so AccountDeck left its sign-in as it is. Try again."
 NOT_REOPENED = f"Claude was closed and could not be reopened by AccountDeck. {OPEN_IT}."
 STILL_QUITTING_MESSAGE = "Claude is still quitting, so AccountDeck could not open it again yet."
 NOT_FOUND_MESSAGE = "AccountDeck cannot find Claude in Applications."
@@ -676,11 +677,17 @@ class ClaudeJob(Operation):
             return False
         return True
 
-    def _point_of_no_return(self, message):
-        """The last cancellation point: from here the job finishes or puts everything back."""
+    def _point_of_no_return(self, message, *, closed=True):
+        """The last cancellation point: from here the job finishes or puts everything back. With `closed` (every
+        job that closed Claude), also the last look that Claude is still closed: one opened since this job closed
+        it (by the user, a login item, a link) would have its sign-in files replaced while it runs."""
         self.set_phase("restoring", message, cancellable=False)
         with self._guard():
             self.checkpoint()
+            if closed:
+                current = observe(self.ctx)
+                if current.desktop or current.code or current.unknown:
+                    raise DeckError(STARTED_AGAIN, "busy")
 
     def _undo(self, exc):
         """A write failed: the transaction puts the files back, Claude reopens as it was and the job ends."""
@@ -1213,7 +1220,7 @@ class Recover(ClaudeJob):
         else:
             for step_id in ("wait", "stop", "settle"):
                 self.note("Claude isn't involved.", step_id=step_id, status="skipped")
-        self._point_of_no_return("Putting the previous sign-in back…")
+        self._point_of_no_return("Putting the previous sign-in back…", closed=involves_claude)
         kept_sessions = False
         with self.step("restore", phase="restoring", message="Putting the previous sign-in back…", cancellable=False):
             for tx in pending:
@@ -1246,6 +1253,13 @@ class Recover(ClaudeJob):
             if ctx.procs.codex_consumers() or ctx.procs.codex_daemon():
                 raise DeckError("Close your Codex sessions, then try again.", "busy")
             switch_codex.recover_one(ctx, tx)
+            return False
+        if tx.doc.get("purpose") == "recover":
+            # A Recover cut short before its own record closed: that record's "before" is the switch's target, so
+            # replaying it would undo the Recover. The switch's record, still open as it closes last, puts the
+            # previous account back whichever of the two comes first.
+            tx.doc["status"] = "superseded"
+            tx.save()
             return False
         outgoing = tx.doc.get("outgoing_id")
         if not outgoing or ctx.store.account(outgoing) is None:

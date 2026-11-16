@@ -12,8 +12,8 @@ from unittest import mock
 
 from tests.helpers import CLAUDE_USAGE, FAST, SyntheticTestCase, new_uuid, terminal_login
 
-from accountdeck import activity, cli_accounts, cli_auto, switch_cli
-from accountdeck.core import DeckError, atomic_write, json_bytes, recover_transactions
+from accountdeck import activity, cli_accounts, cli_auto, switch_claude, switch_cli
+from accountdeck.core import DeckError, FileTransaction, atomic_write, json_bytes, recover_transactions
 from accountdeck.procs import FakeProcessController, unix_time
 from accountdeck.providers import claude_cli
 from accountdeck.providers.claude_cli import ClaudeCLI
@@ -742,6 +742,65 @@ class DesktopSwitchTests(SyntheticTestCase):
         beta_key = engine.store.find("claude", beta["identity"])["id"]               # saved before switching away
         self.assertTrue(engine.store.account(beta_key)["flags"]["restorable"])
         self.assertEqual(engine.vault.get(beta_key)["identity"], beta["identity"])
+        self.assertEqual(recover_transactions(engine.vault), [])
+
+    def desktop(self):
+        """An engine with two saved Claude Desktop accounts, Claude closed and signed in to beta: (engine, alpha's
+        id, alpha, beta), and a function that runs a job and returns its report."""
+        alpha = self.fake_home()["claude"]
+        procs = FakeProcessController(self.paths, timings=FAST, relaunch_identity=alpha["identity"])
+        engine = self.make_engine(procs=procs)
+        alpha_key = engine.accounts.capture("claude", claude_running=False)
+        beta = self.fake_home()["claude"]
+        engine.sense_active()
+
+        def run(action, **body):
+            plan = engine.action("switch-plan", {"provider": "claude", "purpose": action, **body})["plan"]
+            engine.action(action, {"provider": "claude", **body, "plan_id": plan["plan_id"], "consent": "now"})
+            self.assertTrue(engine.runner.wait(20))
+            return engine.runner.report()
+        return engine, alpha_key, alpha, beta, run
+
+    def signed_in(self):
+        return json.loads((self.paths.claude_profile / "config.json").read_bytes())["lastKnownAccountUuid"]
+
+    def test_a_desktop_switch_never_writes_under_a_claude_opened_meanwhile(self):
+        engine, alpha_key, alpha, beta, run = self.desktop()
+        save_current = switch_claude.ClaudeJob._save_current
+
+        def then_claude_opens(job, *args, **kwargs):
+            found = save_current(job, *args, **kwargs)
+            engine.procs.add_claude_desktop()                  # the user opens Claude while its sign-in is saved
+            return found
+        with mock.patch.object(switch_claude.ClaudeJob, "_save_current", autospec=True, side_effect=then_claude_opens):
+            report = run("switch", id=alpha_key)
+        self.assertEqual((report["outcome"], report["error"]["message"]), ("failed", switch_claude.STARTED_AGAIN))
+        self.assertEqual(self.signed_in(), beta["identity"])
+        self.assertEqual(recover_transactions(engine.vault), [])
+
+    def test_a_recover_cut_short_never_puts_the_switch_target_back(self):
+        engine, alpha_key, alpha, beta, run = self.desktop()
+        self.assertEqual(run("switch", id=alpha_key)["outcome"], "success")
+        switch_key = next(p.name.removesuffix(".dpapi") for p in engine.vault.root.glob("transaction-*.dpapi"))
+        tx = FileTransaction.load(engine.vault, engine.roots(), switch_key)
+        tx.doc["status"] = "verifying"                         # the switch is to be undone (claude_verify)
+        tx.save()
+        engine.recovery = recover_transactions(engine.vault)
+        commit = FileTransaction.commit
+
+        def dies_before_closing(record):                       # Recover wrote beta back, then the app died
+            if record.doc.get("purpose") == "recover":
+                raise RuntimeError("the app died here")
+            return commit(record)
+        with mock.patch.object(FileTransaction, "commit", autospec=True, side_effect=dies_before_closing):
+            self.assertEqual(run("recover")["outcome"], "failed")
+        # The next Recover meets the switch's record first, then its own unfinished one.
+        scan = engine._scan_recovery
+        with mock.patch.object(engine, "_scan_recovery", side_effect=lambda: sorted(scan(), key=lambda k: k != switch_key)):
+            engine.recovery = engine._scan_recovery()
+            self.assertEqual((len(engine.recovery), engine.recovery[0]), (2, switch_key))
+            self.assertEqual(run("recover")["outcome"], "success")
+        self.assertEqual(self.signed_in(), beta["identity"])
         self.assertEqual(recover_transactions(engine.vault), [])
 
     def test_a_job_that_has_left_its_wait_is_never_cancelled_for_a_terminal_switch(self):
