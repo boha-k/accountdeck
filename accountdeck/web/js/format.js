@@ -139,7 +139,7 @@
       },
       total: '{n} limit resets available', totalOne: '1 limit reset available',
       setting: 'Read Claude limit resets',
-      settingHint: 'On by default. One more read after usage, hourly or every 15 minutes after Refresh. Refused reads wait longer. Off: Claude limit resets are hidden and cannot be used.',
+      settingHint: 'On by default. One more read after usage, hourly or every 15 minutes after Refresh. Refused reads wait longer. Off: Claude limit resets are hidden and cannot be used, by you or automatically.',
     },
 
     // AccountDeck's own health (state.health from its doctor, state.service from its watchdog).
@@ -446,6 +446,10 @@
       orderNow: 'Order right now', orderManual: 'Your order (top goes first)', orderEmpty: 'Add terminal accounts to see the order.',
       orderReset: 'Reset to Automatic Order', moveUp: 'Move {label} up', moveDown: 'Move {label} down',
       early: 'Use weekly allowance before it resets', earlyHint: 'Switches early to an account whose unused weekly limit is about to reset.',
+      // Automatic limit resets (the auto_reset setting; providers.claude_cli.auto_reset says why they stopped).
+      autoReset: 'Use a limit reset when every terminal account is out',
+      autoResetHint: 'Off unless you turn it on. When every terminal account auto-switch could use is at 97% or more of its weekly or Fable 5.1 weekly limit, AccountDeck uses one Claude limit reset by itself: on the account in use when it holds one that fits, else on another account. One at a time, and it tells you each time. A limit reset cannot be taken back.',
+      autoResetNeeds: 'It works only with “Switch accounts automatically” and “Read Claude limit resets” on.',
       alertsOn: 'Show alerts in AccountDeck', alertsOnHint: 'Low limits, refills and switches appear on this page.',
       browser: 'Browser notifications', browserOn: 'On in this browser.', browserOff: 'Off. The browser asks for your permission once.',
       browserBlocked: "Blocked in this browser's site settings.", browserUnsupported: "This browser can't show notifications.",

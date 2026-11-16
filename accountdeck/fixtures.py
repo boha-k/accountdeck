@@ -77,7 +77,7 @@ DEFAULT_SETTINGS = {
     "use_soon": False, "show_other_limits": False, "cookie_route": True, "alert_low_left": 15, "alerts_enabled": True,
     "quiet_hours": [22, 8], "notify_reset_minutes": 15, "notifications": True, "tray": True, "start_on_login": False,
     "cwd": "/Users/me", "log_level": "info", "refresh_paused": False, "update_check": True, "agy_usage_on_open": True,
-    "claude_resets": True,
+    "claude_resets": True, "auto_reset": False,
 }
 
 

@@ -26,7 +26,9 @@ requests. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the parts fi
   check on its own thread (every 5 minutes and when the user opens AccountDeck) and the update prompt's actions
   (`REPO` there equals `REPO=` in `get.sh`). `resets` is limit resets: the rows and the `resets` block of Claude
   and Codex accounts, Claude's separate resets read after an ordinary read, and the actions `reset-plan` and
-  `use-reset` (its memory is the internal setting `limit_resets`; no table, no vault record).
+  `use-reset` (its memory is the internal setting `limit_resets`; no table, no vault record). `reset_auto`
+  decides the automatic use of one (the setting `auto_reset`, off by default; `due` is pure) and acts only
+  through `Resets.use_automatically`, on the tick just before auto-switch.
 - `accountdeck/platform/`: macOS integration. `appkit` (ctypes Objective-C bridge), `menubar` + `statusbar_mac`
   (menu bar item), `dashboard_window` (WKWebView window), `notify_mac`, `autostart_mac` (LaunchAgent),
   `keychain` + `credstore` (`keychain` also writes agy's item on stdin only and reads an item's attributes
@@ -113,9 +115,28 @@ copy that is running offers it in its update prompt. Push one only when the main
   only once no `agy` runs; a new sign-in that finishes meanwhile is saved and kept, also after Cancel.
   AccountDeck ends only its own runs of `agy`, at their time limits.
 - Nothing under `~/.gemini/` is written; AccountDeck only checks whether agy's file stores exist.
-- A limit reset is never used automatically. Only `use-reset` uses one, for the one account and row of a plan
-  the user confirmed within its 5 minutes (one use per plan); the scheduler, auto-switch, the limit-error watch,
-  the runway, alerts and the recommender never reach it. Never two resets for one click: the request key
+- A limit reset is used in two ways only, and both run the one operation in `resets.py`. `use-reset` uses one
+  for the one account and row of a plan the user confirmed within its 5 minutes (one use per plan). With the
+  setting `auto_reset` on (off by default; it acts only while `cli_autoswitch` and `claude_resets` are on),
+  `reset_auto` uses one Claude Code reset by itself, and only when every account in the terminal pool is out. The
+  pool is the account in use and every account auto-switch could move to. An account that is frozen, on hold,
+  locked by Claude, in need of sign-in or about to lose its login is outside it, and so is one the user left out
+  unless the terminals are on it. Out means 97 % or more (the switch point when that is higher) of the weekly or
+  the Fable weekly limit, by a reading at most 15 minutes old, with that limit's reset still ahead; one account
+  with room, or one whose reading cannot say, and nothing is used. The 5-hour limit never makes an account out.
+  The reset used is one `reset-plan` would offer now that refills every limit holding that account back: on the
+  account in use first, else the one that refills the least beyond what is out (a Fable reset when only Fable is
+  out), then the one that expires first, then auto-switch's order. Never an account the user left out, never a
+  Codex or Claude Desktop reset. One at a time: none while another job runs (no job gives way to it), while
+  auto-switch itself is held, while any account's request key is open, before a reading of that account showed
+  the refill, within an hour of the last one, or within 10 minutes (doubling to an hour) of a try that used
+  nothing. The tick only decides and makes no request; the operation asks once more right before sending, and
+  the record of the use (`last` in `limit_resets`) is saved before the request is sent, as the request key is. A
+  reading taken 10 minutes or more after a reset that still shows its limit at the bar stops automatic resets,
+  with an alert, until the user turns the setting off and on; so does a record that cannot be read back. Every
+  automatic use writes an event and an alert that name the account, the reset and the reason. Nothing else uses
+  a reset: the scheduler, auto-switch, the limit-error watch, the runway, alerts and the recommender never reach
+  it. Never two resets for one click or one decision: the request key
   (Codex's `idempotencyKey`, Claude's `request_id`, a UUID 4) is saved before the request is sent and sent again
   for the same reset while its outcome is not known (Claude 10 minutes, Codex 24 hours); a new one is made only
   once the provider's answer about the reset or a reading settled it (its count down: used; still there after

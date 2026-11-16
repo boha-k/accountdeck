@@ -6,6 +6,18 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 
 ## [Unreleased]
 
+### Added
+
+- **Use a limit reset when every terminal account is out**, a setting in Settings → Auto-Switch, off unless
+  you turn it on. When every terminal account auto-switch could use is at 97 % or more of its weekly or Fable
+  weekly limit, AccountDeck uses one Claude Code limit reset by itself: on the account in use when it holds
+  one that fits (a Fable reset when only Fable is out, a weekly one when the week is), else on another
+  account, where auto-switch then moves the terminals. One at a time: never while another action runs or an
+  outcome is not known, never before a reading shows the refill, and at most one an hour. If a reset does
+  not refill its limit, automatic resets stop with an alert until you turn the setting off and on. Each use
+  is told as a report, a line in Recent activity and a notification. Codex and Claude Desktop resets are
+  never used automatically, and an account you left out of auto-switch is never reset.
+
 ### Changed
 
 - Claude limit resets show and can be used. Anthropic lists an account's resets only to Claude Code and
