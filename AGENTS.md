@@ -123,7 +123,8 @@ copy that is running offers it in its update prompt. Push one only when the main
   locked by Claude, in need of sign-in or about to lose its login is outside it, and so is one the user left out
   unless the terminals are on it. Out means 97 % or more (for the account in use the switch point when that is
   higher) of the weekly or the Fable weekly limit, by a reading at most 15 minutes old, with that limit's reset
-  still ahead; one account with room, or one whose reading cannot say, and nothing is used. A reading that shows
+  still ahead; one account with room (the account in use too while only its sign-in keeps it out of the pool),
+  or one whose reading cannot say, and nothing is used. A reading that shows
   an account out cannot say when it was taken before a reset used on that account through AccountDeck (the
   user's own included) or under 10 minutes after it, and a limit that refills by itself within 10 minutes is
   waited for. The 5-hour limit never makes an account out.

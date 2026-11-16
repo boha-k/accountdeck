@@ -483,7 +483,8 @@ are narrow:
   looks for another account only from there. The accounts that count are the one in use and
   those auto-switch may move to. Accounts you left out of auto-switch, accounts still signed in on the PC,
   and accounts that need sign-in, are on hold, are locked by Claude or are about to lose their login do
-  not count. One account with room is enough to use nothing. So is one whose reading cannot say (none
+  not count. One account with room is enough to use nothing, the one in use too while its sign-in is ending
+  or needs attention (a reset does not mend a sign-in). So is one whose reading cannot say (none
   yet, too old, incomplete): that account is read again first. A reading that shows an account out cannot
   say either when it was taken before a limit reset used on that account through AccountDeck (by you or
   automatically) or in the 10 minutes after it, because usage can lag behind a reset. A limit that refills

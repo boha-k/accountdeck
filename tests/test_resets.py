@@ -568,6 +568,20 @@ class AutomaticResetTests(SyntheticTestCase):
         reset_auto.tick(self.engine)
         return self.finish()
 
+    def test_the_account_in_use_with_room_holds_off_a_reset_whatever_its_sign_in(self):
+        now = self.clock[0]
+
+        def row(key, active, weekly, **fields):
+            usage = claude_usage({"five_hour": None, "seven_day": {"utilization": weekly, "resets_at": FAR}}, now=now)
+            return {"id": key, "active": active, "health": "ok", "windows": usage["windows"], "reading_age": 60,
+                    "login_ends_at": None, **fields}
+
+        settings, others = {"cli_threshold": 95, "pinned_model": ""}, [row("b", False, 99), row("c", False, 98)]
+        self.assertTrue(reset_auto.due([row("a", True, 99)] + others, settings, now)["due"])
+        # A reset does not mend a sign-in: room on the account in use means not every limit is out.
+        for active in (row("a", True, 50, login_ends_at=now + 600), row("a", True, 50, health="reauth_required")):
+            self.assertEqual(reset_auto.due([active] + others, settings, now)["why"], "room")
+
     def test_a_reset_is_used_by_itself_only_with_the_setting_on_and_every_pool_account_out(self):
         engine = self.engine
         beta, spare, signin = self.add("beta"), self.add("spare"), self.add("signin")

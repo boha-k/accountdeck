@@ -119,11 +119,19 @@ def due(accounts, settings, now, used=None):
         return result
     pinned, out, unknown, soon = settings.get("pinned_model"), {}, [], False
     for account in accounts:
-        if not in_pool(account, settings, now):
+        pooled = in_pool(account, settings, now)
+        if not pooled and not (account.get("active") and not cli_policy.blocked(account, settings)):
             continue
         age, limits = cli_policy.reading_age(account, now), None
         if age is not None and age <= FRESH:
             limits = out_limits(account.get("windows"), now - age, pinned, bar(settings, account.get("active")), now)
+        if not pooled:
+            # The account in use, left out only for its sign-in (ending, or needing attention): a reset does not
+            # mend a sign-in, so its room still means "not every limit is out" (the maintainer's rule). It is never
+            # one to reset.
+            if limits is not None and WEEKLY not in limits and FABLE not in limits:
+                return {**result, "why": "room"}
+            continue
         if limits is None:
             unknown.append(account)
         elif WEEKLY in limits or FABLE in limits:
