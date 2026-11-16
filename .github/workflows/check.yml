@@ -1,0 +1,79 @@
+# The gate every change passes, on an Apple-silicon macOS runner with the same pinned Python and cryptography as
+# install.sh: lint and tools/check.sh (unit tests in safe mode, demo smoke, doctor), the release package built and
+# installed hermetically with get.sh (tools/build_mac_package.sh, tools/mac_package_test.sh), and an update over each
+# released version's data that must keep every account (tools/upgrade_test.sh). Nothing here touches a real account,
+# a real home folder or a keychain. Publishing a release is release.yml, which runs the same steps on a tag except
+# the lint: ruff comes from PyPI by version, without a checked hash, and nothing like that runs in the job that can
+# publish.
+#
+# Full history and tags: the data-compatibility and upgrade tests build the released versions from their tags, and
+# say in the log when a tag is missing and what they did instead. 2.0.0 and 2.1.0 were released before this
+# repository's history begins, so their tags are not here: their saved data (tests/fixtures/) is still tested.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    # While the repository is private its macOS minutes are billed ×10, so a push to main runs nothing: the pull
+    # request ran these checks on the same code. Once the repository is public, every push to main runs them.
+    if: github.event_name != 'push' || !github.event.repository.private
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Released versions available
+        run: git tag --list 'v*'
+
+      - name: The pinned runtime (install.sh's files and SHA-256)
+        run: |
+          set -euo pipefail
+          pin() { sed -n "s/^$1=//p" install.sh; }
+          pins="$RUNNER_TEMP/pins"     # one folder, real names: install.sh --downloads looks them up by name
+          mkdir -p "$pins"
+          for name in PY CFFI CRYPTO; do
+            url=$(pin "${name}_URL"); sha=$(pin "${name}_SHA")
+            [ -n "$url" ] && [ -n "$sha" ] || { echo "::error::install.sh has no ${name}_URL or ${name}_SHA pin"; exit 1; }
+            curl -fsSL --proto '=https' --tlsv1.2 --retry 2 --connect-timeout 30 -o "$pins/${url##*/}" "$url"
+            echo "$sha  $pins/${url##*/}" | shasum -a 256 -c -
+          done
+          py=$(pin PY_URL); cffi=$(pin CFFI_URL); crypto=$(pin CRYPTO_URL)
+          mkdir "$RUNNER_TEMP/runtime"
+          tar -xzf "$pins/${py##*/}" -C "$RUNNER_TEMP/runtime"
+          python="$RUNNER_TEMP/runtime/python/bin/python3.14"
+          "$python" -I -m pip install --no-index --no-deps --no-cache-dir --disable-pip-version-check \
+            --no-warn-script-location --quiet "$pins/${cffi##*/}" "$pins/${crypto##*/}"   # wheels: pip reads the tags in the names
+          echo "ACCOUNTDECK_PYTHON=$python" >> "$GITHUB_ENV"
+          echo "ACCOUNTDECK_PINS=$pins" >> "$GITHUB_ENV"
+
+      - name: Lint tool (tools/check.sh looks for it in .venv-dev)
+        run: |
+          "$ACCOUNTDECK_PYTHON" -I -m venv .venv-dev
+          .venv-dev/bin/pip install --quiet --disable-pip-version-check "ruff==0.16.10"
+
+      - name: tools/check.sh
+        run: bash tools/check.sh
+
+      - name: Build the release package
+        run: bash tools/build_mac_package.sh
+
+      - name: Install the package, and with get.sh from a file:// release (hermetic)
+        run: bash tools/mac_package_test.sh --downloads "$ACCOUNTDECK_PINS"
+
+      - name: Update over each released version, every account kept (hermetic)
+        run: bash tools/upgrade_test.sh --downloads "$ACCOUNTDECK_PINS"

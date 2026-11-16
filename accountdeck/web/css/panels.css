@@ -1,0 +1,222 @@
+/* AccountDeck 2 — banners and notices, the demo / safe-mode strip, the activity and
+ * troubleshooting panel, and the Import from PC screens. */
+
+/* ---- Banners: calm inline messages, an icon, a title line, a message line, actions on the right */
+
+.banner {
+  --tone: var(--accent-text);
+  --tint: var(--surface);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 11px 12px 11px 14px;
+  border-radius: 14px;
+  background: var(--tint);
+  box-shadow: var(--shadow-card);
+}
+.banner[data-level="good"] { --tone: var(--green-text); }
+.banner[data-level="warning"] { --tone: var(--orange-text); --tint: color-mix(in srgb, var(--orange) 10%, var(--surface)); }
+.banner[data-level="error"] { --tone: var(--red-text); --tint: color-mix(in srgb, var(--red) 10%, var(--surface)); }
+.banner-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: var(--tone);
+}
+.banner-icon .icon { width: 16px; height: 16px; }
+.banner-text { flex: 1 1 260px; min-width: 0; }
+.banner-title { font-size: var(--text-md); font-weight: 600; line-height: 1.35; }
+.banner-message { margin-top: 1px; color: var(--label-2); font-size: var(--text-md); line-height: 1.45; }
+.banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.banner-link { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-sm); }
+.banner-link .icon { width: 12px; height: 12px; }
+.banner.is-compact { padding: 8px 10px 8px 12px; }
+.banner.is-compact .banner-icon { width: 22px; height: 22px; }
+.banner.is-compact .banner-icon .icon { width: 13px; height: 13px; }
+.move-result { display: grid; gap: 8px; margin-top: 6px; }
+.banner-action { margin-top: 2px; color: var(--label); font-size: var(--text-md); font-weight: 500; line-height: 1.45; }
+/* Sessions stopped at a limit: name, then where and when, one line each. */
+.stopped-list { display: grid; margin-top: 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.stopped-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 6px 10px;
+  border-top: .5px solid var(--separator);
+  font-size: var(--text-md);
+}
+.stopped-row:first-child { border-top: 0; }
+.stopped-name { font-weight: 600; overflow-wrap: anywhere; }
+.stopped-detail { color: var(--label-2); font-size: var(--text-sm); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* ---- #system: demo and safe mode in one slim strip; connection problems as full banners ------ */
+
+#system { gap: 8px; }
+.dev-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  min-height: 36px;
+  padding: 4px 8px 4px 10px;
+  border-radius: 12px;
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 .5px var(--separator);
+  color: var(--label-2-on-fill);
+  font-size: var(--text-sm);
+}
+.dev-strip-text { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; flex: 1 1 280px; min-width: 0; }
+.dev-strip .badge { height: 18px; }
+.demo-scrubber { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.demo-label { color: var(--label-2-on-fill); font-weight: 500; white-space: nowrap; }
+.demo-range { width: 160px; height: 18px; margin: 0; accent-color: var(--accent); }
+.demo-offset { min-width: 17ch; color: var(--label); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .demo-scrubber { width: 100%; }
+  .demo-range { flex: 1 1 120px; width: auto; }
+  .demo-offset { min-width: 0; }
+  .banner-actions { width: 100%; justify-content: flex-end; }
+}
+
+/* ---- Sticky notices above the accounts --------------------------------------------------------- */
+
+.notice {
+  --tone: var(--accent-text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  font-size: var(--text-md);
+}
+.notice[data-level="good"] { --tone: var(--green-text); }
+.notice[data-level="warning"] { --tone: var(--orange-text); background: color-mix(in srgb, var(--orange) 9%, var(--surface)); }
+.notice[data-level="critical"] { --tone: var(--red-text); background: color-mix(in srgb, var(--red) 9%, var(--surface)); }
+.notice-icon { display: inline-grid; flex: none; color: var(--tone); }
+.notice-text { flex: 1; min-width: 0; }
+
+/* ---- Activity and troubleshooting --------------------------------------------------------------- */
+
+.details-section:empty { display: none; }
+.details-panel {
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.details-panel > summary { min-height: 46px; padding: 8px 16px; color: var(--label); }
+.details-panel[open] > summary { border-bottom: .5px solid var(--separator); }
+.details-body { display: grid; gap: 20px; padding: 16px 18px 18px; }
+.details-part { display: grid; gap: 8px; }
+.details-part:focus { outline: none; }
+.details-heading { color: var(--label-2); font-size: var(--text-sm); font-weight: 600; }
+.details-actions { display: flex; gap: 8px; }
+
+.events { display: grid; }
+.event {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 14px;
+  padding: 7px 0;
+  border-bottom: .5px solid var(--separator);
+  font-size: var(--text-md);
+}
+.event:last-child { border-bottom: 0; }
+.event time { color: var(--label-2); }
+
+.manifest { display: grid; font-size: var(--text-md); }
+.manifest-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr);
+  gap: 16px;
+  padding: 7px 0;
+  border-bottom: .5px solid var(--separator);
+}
+.manifest-row:last-child { border-bottom: 0; }
+.manifest-row dt { color: var(--label-2); }
+.manifest-row dd { margin: 0; overflow-wrap: anywhere; }
+.manifest-list { padding-left: 18px; list-style: decimal; }
+.is-quiet { color: var(--label-2); }
+
+/* AccountDeck's own health: a status line, what fails or is worth a look, then every check on request. */
+.health-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: var(--text-md); font-weight: 500; }
+.health-line .icon { width: 15px; height: 15px; flex: none; }
+.health-line .is-quiet { font-weight: 400; }
+.health-line[data-tone="ok"] .icon { color: var(--green-text); }
+.health-line[data-tone="warn"] .icon { color: var(--orange-text); }
+.health-line[data-tone="fail"] { color: var(--red-text); }
+.health-line[data-tone="quiet"] { color: var(--label-2); font-weight: 400; }
+.health-list { display: grid; }
+.health-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: .5px solid var(--separator);
+  font-size: var(--text-md);
+}
+.health-item:last-child { border-bottom: 0; }
+.health-item > .icon { width: 14px; height: 14px; margin-top: 2px; color: var(--label-2); }
+.health-item[data-level="fail"] > .icon { color: var(--red-text); }
+.health-item[data-level="warn"] > .icon { color: var(--orange-text); }
+.health-item[data-level="ok"] > .icon { color: var(--green-text); }
+.health-words { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.health-words .is-quiet { font-size: var(--text-sm); }
+.health-service { font-size: var(--text-sm); }
+.health-all > summary { font-size: var(--text-sm); }
+.health-all[open] > summary { margin-bottom: 4px; }
+
+pre {
+  max-width: 100%;
+  max-height: 380px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-inner);
+  background: var(--surface-sunken);
+  color: var(--label);
+  font: 11.5px/1.55 var(--font-mono);
+}
+
+@media (max-width: 640px) {
+  .manifest-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .event { grid-template-columns: 70px minmax(0, 1fr); gap: 10px; }
+}
+
+/* ---- Import from PC --------------------------------------------------------------------------- */
+
+.import-list { display: grid; border-radius: var(--radius-inner); background: var(--fill-1); }
+.import-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-top: .5px solid var(--separator);
+}
+.import-row:first-child { border-top: 0; }
+.import-text { display: grid; gap: 1px; min-width: 0; }
+.import-text strong { font-size: var(--text-md); font-weight: 600; overflow-wrap: anywhere; }
+.import-meta { color: var(--label-2); font-size: var(--text-sm); }
+.import-note { color: var(--orange-text); font-size: var(--text-sm); }
+.move-form { display: grid; gap: 14px; }
+.move-field { display: grid; gap: 6px; }
+.move-field label { font-weight: 600; }
+.move-code {
+  display: block;
+  padding: 10px 0 2px;
+  font: 600 32px/1.1 var(--font-mono);
+  letter-spacing: .12em;
+  text-align: center;
+  user-select: all;
+  -webkit-user-select: all;
+}
+.move-path { font-family: var(--font-mono); font-size: var(--text-sm); overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }

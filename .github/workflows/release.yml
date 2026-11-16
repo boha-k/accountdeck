@@ -1,0 +1,116 @@
+# Publishes a release when a tag vX.Y.Z is pushed. It refuses a tag that is not on main or not "v" + __version__ of
+# accountdeck/__init__.py, and a version without its dated "## [X.Y.Z] - YYYY-MM-DD" heading in CHANGELOG.md (the
+# section becomes the release notes). Then it runs the same tests as check.yml (keep the two in step), builds the
+# package and creates the GitHub release with three files: AccountDeck2-mac.tar.gz and its .sha256, which get.sh
+# downloads, and get.sh itself (the same file as in the package), which the one-line installer runs:
+#     curl -fsSL https://github.com/OWNER/REPO/releases/latest/download/get.sh | bash
+# What is published is exactly what was tested, in the same job.
+#
+# The job can write to the repository (contents: write), and code that runs in any step of a job can reach the job's
+# token, wherever it is handed. So this job runs no third-party code that is not pinned: the checkout action by its
+# commit, the Python runtime and its two wheels by install.sh's SHA-256 pins, nothing from a package index. That is
+# why there is no lint step here: lint needs ruff from PyPI, and it already gates every pull request and push to main
+# (check.yml). The token itself is handed only to the publishing step, as GH_TOKEN.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write     # gh release create (see the header: nothing unpinned runs in this job)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: The tag, the version and the changelog agree
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^__version__ = "\([^"]*\)".*$/\1/p' accountdeck/__init__.py)
+          [ -n "$version" ] || { echo "::error::accountdeck/__init__.py has no __version__ line"; exit 1; }
+          [ "$TAG" = "v$version" ] || { echo "::error::the tag $TAG is not v$version, the version in accountdeck/__init__.py"; exit 1; }
+          # Only merged code is published: the tagged commit must be on main (the checkout fetched every branch).
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main \
+            || { echo "::error::the tag $TAG is not on main: tag a commit that main holds"; exit 1; }
+          [ -f CHANGELOG.md ] || { echo "::error::CHANGELOG.md is missing"; exit 1; }
+          # The heading must carry the release date: "## [X.Y.Z] - YYYY-MM-DD" ("Unreleased" or no date is refused).
+          heading="## [$version] - "
+          dated=$(awk -v head="$heading" 'index($0, head) == 1 { print substr($0, length(head) + 1) }' CHANGELOG.md)
+          printf '%s\n' "$dated" | grep -qxE '[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[[:space:]]*' \
+            || { echo "::error::CHANGELOG.md has no dated heading \"## [$version] - YYYY-MM-DD\" for this release"; exit 1; }
+          # The section from "## [X.Y.Z]" to the next "## [" heading or the link list at the end, blank edges trimmed.
+          awk -v head="## [$version]" '
+            index($0, "## [") == 1 { if (found) exit; found = (index($0, head) == 1); next }
+            /^\[[^]]+\]: / { if (found) exit }
+            found { lines[++n] = $0 }
+            END {
+              first = 1; while (first <= n && lines[first] ~ /^[[:space:]]*$/) first++
+              last = n;  while (last >= first && lines[last] ~ /^[[:space:]]*$/) last--
+              for (i = first; i <= last; i++) print lines[i]
+            }' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          [ -s "$RUNNER_TEMP/notes.md" ] || { echo "::error::CHANGELOG.md has no section \"## [$version] - YYYY-MM-DD\" with text in it"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "Release notes for $version:"; cat "$RUNNER_TEMP/notes.md"
+
+      - name: Released versions available
+        run: git tag --list 'v*'
+
+      - name: The pinned runtime (install.sh's files and SHA-256)
+        run: |
+          set -euo pipefail
+          pin() { sed -n "s/^$1=//p" install.sh; }
+          pins="$RUNNER_TEMP/pins"     # one folder, real names: install.sh --downloads looks them up by name
+          mkdir -p "$pins"
+          for name in PY CFFI CRYPTO; do
+            url=$(pin "${name}_URL"); sha=$(pin "${name}_SHA")
+            [ -n "$url" ] && [ -n "$sha" ] || { echo "::error::install.sh has no ${name}_URL or ${name}_SHA pin"; exit 1; }
+            curl -fsSL --proto '=https' --tlsv1.2 --retry 2 --connect-timeout 30 -o "$pins/${url##*/}" "$url"
+            echo "$sha  $pins/${url##*/}" | shasum -a 256 -c -
+          done
+          py=$(pin PY_URL); cffi=$(pin CFFI_URL); crypto=$(pin CRYPTO_URL)
+          mkdir "$RUNNER_TEMP/runtime"
+          tar -xzf "$pins/${py##*/}" -C "$RUNNER_TEMP/runtime"
+          python="$RUNNER_TEMP/runtime/python/bin/python3.14"
+          "$python" -I -m pip install --no-index --no-deps --no-cache-dir --disable-pip-version-check \
+            --no-warn-script-location --quiet "$pins/${cffi##*/}" "$pins/${crypto##*/}"   # wheels: pip reads the tags in the names
+          echo "ACCOUNTDECK_PYTHON=$python" >> "$GITHUB_ENV"
+          echo "ACCOUNTDECK_PINS=$pins" >> "$GITHUB_ENV"
+
+      - name: tools/check.sh, without lint (no tool from a package index runs in this job)
+        run: bash tools/check.sh
+
+      - name: Build the release package
+        run: bash tools/build_mac_package.sh
+
+      - name: Install the package, and with get.sh from a file:// release (hermetic)
+        run: bash tools/mac_package_test.sh --downloads "$ACCOUNTDECK_PINS"
+
+      - name: Update over each released version, every account kept (hermetic)
+        run: bash tools/upgrade_test.sh --downloads "$ACCOUNTDECK_PINS"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          (cd dist && shasum -a 256 -c AccountDeck2-mac.tar.gz.sha256)
+          tar -xzOf dist/AccountDeck2-mac.tar.gz AccountDeck2-mac/get.sh | cmp -s - dist/get.sh \
+            || { echo "::error::dist/get.sh is not the get.sh in the package"; exit 1; }
+          gh release create "$TAG" dist/AccountDeck2-mac.tar.gz dist/AccountDeck2-mac.tar.gz.sha256 dist/get.sh \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "AccountDeck $VERSION" --notes-file "$RUNNER_TEMP/notes.md"

@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+test-results/
+*.sqlite3*
+*.dpapi
+runtime.json
+node_modules/
+.pytest_cache/
+# AccountDeck 2 runtime files, should a --data folder ever sit inside the checkout.
+service.lock
+startup-error.txt
+accountdeck2.log*
+*.adeck
+# tools/build_mac_package.sh writes the release package here.
+dist/
+.DS_Store
+.venv-dev/
+.ruff_cache/

@@ -1,0 +1,18 @@
+#!/bin/bash
+# A fake `open` for tools/upgrade_test.sh (install.sh refuses ACCOUNTDECK2_INSTALL_ROOT unless open and launchctl
+# are fakes first on PATH). `open <root>/Applications/AccountDeck 2.app` starts tools/upgrade/stub_service.py for
+# that root's app folder, on that root's runtime, as opening the app starts the service. Like the real app
+# (LSMultipleInstancesProhibited), opening it again while it runs starts nothing. Anything else is refused.
+set -euo pipefail
+here=$(cd "$(dirname "$0")/.." && pwd -P)
+app=${1-}
+case "$app" in */Applications/"AccountDeck 2.app") ;; *) echo "fake open: only opens a test root's AccountDeck 2.app" >&2; exit 1 ;; esac
+root=$(cd "${app%/Applications/*}" && pwd -P)
+[ "$root" != "$(cd "$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory | sed 's/^NFSHomeDirectory: //')" && pwd -P)" ] \
+    || { echo "fake open: refuses the real home" >&2; exit 1; }
+support="$root/Library/Application Support/AccountDeck2"
+python="$support/runtime/python/bin/python3.14"
+[ -x "$python" ] && [ -f "$support/app/run.py" ] || { echo "fake open: nothing installed in $root" >&2; exit 1; }
+if pgrep -U "$(id -u)" -f -- "python3[^ ]* .*$support/app/run\.py" >/dev/null 2>&1; then exit 0; fi
+nohup "$python" -I -B "$here/stub_service.py" "$support" "$support/app/run.py" </dev/null >>"$root/stub.log" 2>&1 &
+exit 0

@@ -1,0 +1,282 @@
+/* AccountDeck 2 — design tokens for the Mac dashboard.
+ *
+ * The palette follows macOS system colours (label hierarchy, separators, fills, systemBlue/Green/
+ * Orange/Red/Purple), tuned so every text pair meets WCAG AA on its surface in both appearances:
+ * text colours (`--*-text`) clear 4.5:1 on --surface, --surface-2 and their 14 % tints; meter fills
+ * (`--*-meter`) clear 3:1 against the meter track; white on --accent-fill clears 4.5:1.
+ *
+ * Appearance: light on :root; dark follows the system unless data-theme="light"; data-theme="dark"
+ * forces dark. The dark block is written once and shared by both selectors. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces: the window, grouped boxes (cards) and raised rows inside them. */
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-2: #f5f5f7;
+  --surface-sunken: #ebebef;
+  /* Translucent fills (macOS quaternary → secondary system fills). */
+  --fill-1: rgba(0, 0, 0, .04);
+  --fill-2: rgba(0, 0, 0, .07);
+  --fill-3: rgba(0, 0, 0, .11);
+  --separator: rgba(0, 0, 0, .1);
+  --separator-strong: rgba(0, 0, 0, .18);
+  /* Label hierarchy. --label-3 is decoration only (never the sole carrier of information). */
+  --label: #1d1d1f;
+  --label-2: #6e6e73;
+  --label-3: #8e8e93;
+  /* Secondary text that sits on a translucent fill (badges, the dev strip). */
+  --label-2-on-fill: #545458;
+
+  /* systemBlue: the accent. --accent for graphics, --accent-text for text, --accent-fill under white text. */
+  --accent: #007aff;
+  --accent-text: #0066cc;
+  --accent-fill: #0071e3;
+  --accent-fill-hover: #0068d1;
+  --accent-tint: rgba(0, 122, 255, .1);
+  --accent-meter: #0071e3;
+  --focus-ring: rgba(0, 122, 255, .55);
+  --on-accent: #ffffff;
+
+  --green: #34c759;
+  --green-text: #187733;
+  --orange: #ff9500;
+  --orange-text: #a85300;
+  --orange-meter: #c96400;
+  --red: #ff3b30;
+  --red-text: #c4001a;
+  --red-meter: #e5321f;
+  /* Fable 5.1's own hue: a label marker and the leader's crown, never a meter fill. */
+  --purple: #af52de;
+  --purple-text: #8b3dc4;
+
+  /* Materials (vibrancy): toolbar, menus, toasts and glass capsules. */
+  --material: rgba(246, 246, 248, .78);
+  --material-thick: rgba(250, 250, 252, .9);
+  --material-solid: #f6f6f8;
+  --glass-rim: inset 0 0 0 .5px rgba(0, 0, 0, .12), inset 0 1px 0 rgba(255, 255, 255, .7);
+  --blur: saturate(180%) blur(24px);
+
+  --meter-track: rgba(0, 0, 0, .09);
+  --backdrop: rgba(0, 0, 0, .22);
+
+  --shadow-card: 0 0 0 .5px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .04);
+  --shadow-control: 0 0 0 .5px rgba(0, 0, 0, .12), 0 1px 1.5px rgba(0, 0, 0, .08);
+  --shadow-pop: 0 0 0 .5px rgba(0, 0, 0, .14), 0 10px 30px rgba(0, 0, 0, .14), 0 2px 6px rgba(0, 0, 0, .06);
+  --shadow-window: 0 0 0 .5px rgba(0, 0, 0, .18), 0 24px 70px rgba(0, 0, 0, .22), 0 6px 16px rgba(0, 0, 0, .08);
+  --window-rim: none;
+  --control-bg: #ffffff;
+  --control-hover: #f8f8fa;
+  --knob: #ffffff;
+
+  /* Type: SF Pro through the system font stack; SF Mono for codes, paths and logs. */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Helvetica Neue", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 17px;
+  --text-2xl: 22px;
+  --text-3xl: 34px;
+
+  /* Shape: concentric radii (a control inside a card is the card's radius minus its padding). */
+  --radius-window: 20px;
+  --radius-card: 16px;
+  --radius-inner: 10px;
+  --radius-control: 999px;
+  --radius-field: 8px;
+  --radius-small: 6px;
+
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 260ms;
+  --ease: cubic-bezier(.25, .8, .3, 1);
+  --ease-out: cubic-bezier(.2, .9, .3, 1);
+
+  --gutter: 24px;
+  --page-max: 1600px;
+  --overview-width: 368px;
+  --toolbar-height: 52px;
+}
+
+/* Dark appearance (macOS dark: window #1e1e1e, grouped boxes a step lighter). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e1e1e;
+    --surface: #2a2a2c;
+    --surface-2: #323234;
+    --surface-sunken: #19191a;
+    --fill-1: rgba(255, 255, 255, .05);
+    --fill-2: rgba(255, 255, 255, .08);
+    --fill-3: rgba(255, 255, 255, .13);
+    --separator: rgba(255, 255, 255, .1);
+    --separator-strong: rgba(255, 255, 255, .18);
+    --label: #f5f5f7;
+    --label-2: #aeaeb2;
+    --label-3: #6e6e73;
+    --label-2-on-fill: #c7c7cc;
+    --accent: #0a84ff;
+    --accent-text: #5aabff;
+    --accent-fill: #0a6fd8;
+    --accent-fill-hover: #1a7be6;
+    --accent-tint: rgba(10, 132, 255, .16);
+    --accent-meter: #2a93ff;
+    --focus-ring: rgba(10, 132, 255, .7);
+    --green: #30d158;
+    --green-text: #30d158;
+    --orange: #ff9f0a;
+    --orange-text: #ff9f0a;
+    --orange-meter: #ff9f0a;
+    --red: #ff453a;
+    --red-text: #ff7a72;
+    --red-meter: #ff5c52;
+    --purple: #bf5af2;
+    --purple-text: #d08cff;
+    --material: rgba(40, 40, 42, .72);
+    --material-thick: rgba(44, 44, 46, .9);
+    --material-solid: #2c2c2e;
+    --glass-rim: inset 0 0 0 .5px rgba(255, 255, 255, .14), inset 0 1px 0 rgba(255, 255, 255, .08);
+    --meter-track: rgba(255, 255, 255, .08);
+    --backdrop: rgba(0, 0, 0, .45);
+    --shadow-card: 0 0 0 .5px rgba(255, 255, 255, .07);
+    --shadow-control: inset 0 .5px 0 rgba(255, 255, 255, .1), 0 0 0 .5px rgba(0, 0, 0, .4);
+    --shadow-pop: 0 0 0 .5px rgba(0, 0, 0, .6), 0 12px 36px rgba(0, 0, 0, .5);
+    --shadow-window: 0 0 0 .5px rgba(0, 0, 0, .7), 0 28px 80px rgba(0, 0, 0, .6);
+    --window-rim: inset 0 0 0 .5px rgba(255, 255, 255, .14);
+    --control-bg: rgba(255, 255, 255, .1);
+    --control-hover: rgba(255, 255, 255, .14);
+    --knob: #e9e9eb;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --surface: #2a2a2c;
+  --surface-2: #323234;
+  --surface-sunken: #19191a;
+  --fill-1: rgba(255, 255, 255, .05);
+  --fill-2: rgba(255, 255, 255, .08);
+  --fill-3: rgba(255, 255, 255, .13);
+  --separator: rgba(255, 255, 255, .1);
+  --separator-strong: rgba(255, 255, 255, .18);
+  --label: #f5f5f7;
+  --label-2: #aeaeb2;
+  --label-3: #6e6e73;
+  --label-2-on-fill: #c7c7cc;
+  --accent: #0a84ff;
+  --accent-text: #5aabff;
+  --accent-fill: #0a6fd8;
+  --accent-fill-hover: #1a7be6;
+  --accent-tint: rgba(10, 132, 255, .16);
+  --accent-meter: #2a93ff;
+  --focus-ring: rgba(10, 132, 255, .7);
+  --green: #30d158;
+  --green-text: #30d158;
+  --orange: #ff9f0a;
+  --orange-text: #ff9f0a;
+  --orange-meter: #ff9f0a;
+  --red: #ff453a;
+  --red-text: #ff7a72;
+  --red-meter: #ff5c52;
+  --purple: #bf5af2;
+  --purple-text: #d08cff;
+  --material: rgba(40, 40, 42, .72);
+  --material-thick: rgba(44, 44, 46, .9);
+  --material-solid: #2c2c2e;
+  --glass-rim: inset 0 0 0 .5px rgba(255, 255, 255, .14), inset 0 1px 0 rgba(255, 255, 255, .08);
+  --meter-track: rgba(255, 255, 255, .08);
+  --backdrop: rgba(0, 0, 0, .45);
+  --shadow-card: 0 0 0 .5px rgba(255, 255, 255, .07);
+  --shadow-control: inset 0 .5px 0 rgba(255, 255, 255, .1), 0 0 0 .5px rgba(0, 0, 0, .4);
+  --shadow-pop: 0 0 0 .5px rgba(0, 0, 0, .6), 0 12px 36px rgba(0, 0, 0, .5);
+  --shadow-window: 0 0 0 .5px rgba(0, 0, 0, .7), 0 28px 80px rgba(0, 0, 0, .6);
+  --window-rim: inset 0 0 0 .5px rgba(255, 255, 255, .14);
+  --control-bg: rgba(255, 255, 255, .1);
+  --control-hover: rgba(255, 255, 255, .14);
+  --knob: #e9e9eb;
+}
+:root[data-theme="light"] { color-scheme: light; }
+
+/* Increase contrast (System Settings › Accessibility › Display): stronger separators and secondary text. */
+@media (prefers-contrast: more) {
+  :root {
+    --separator: rgba(0, 0, 0, .32);
+    --separator-strong: rgba(0, 0, 0, .5);
+    --label-2: #4a4a4f;
+    --meter-track: rgba(0, 0, 0, .16);
+    --shadow-card: 0 0 0 1px rgba(0, 0, 0, .4);
+  }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --separator: rgba(255, 255, 255, .35);
+    --separator-strong: rgba(255, 255, 255, .55);
+    --label-2: #d1d1d6;
+    --meter-track: rgba(255, 255, 255, .16);
+    --shadow-card: 0 0 0 1px rgba(255, 255, 255, .4);
+  }
+}
+@media (prefers-contrast: more) {
+  :root[data-theme="dark"] {
+    --separator: rgba(255, 255, 255, .35);
+    --separator-strong: rgba(255, 255, 255, .55);
+    --label-2: #d1d1d6;
+    --meter-track: rgba(255, 255, 255, .16);
+    --shadow-card: 0 0 0 1px rgba(255, 255, 255, .4);
+  }
+}
+
+/* Reduce transparency: materials become opaque. */
+@media (prefers-reduced-transparency: reduce) {
+  :root { --material: var(--material-solid); --material-thick: var(--material-solid); --blur: none; }
+}
+
+/* Reduce motion: state, text and icons stay; movement goes. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 1ms; --dur: 1ms; --dur-slow: 1ms; }
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- Keyframes --------------------------------------------------------------------------------- */
+
+@keyframes ad-spin { to { transform: rotate(360deg); } }
+@keyframes ad-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ad-sheet-in {
+  from { opacity: 0; transform: translateY(-10px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ad-alert-in {
+  from { opacity: 0; transform: scale(1.04); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ad-pop-in {
+  from { opacity: 0; transform: scale(.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ad-toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+/* A soft band sliding along a track: a refresh in progress, a limit resetting. */
+@keyframes ad-band {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+/* A row's refill: one gentle green wash, then nothing. */
+@keyframes ad-refill {
+  0% { background-color: color-mix(in srgb, var(--green) 18%, transparent); }
+  100% { background-color: transparent; }
+}
+/* A row brought into view from the overview: one accent wash. */
+@keyframes ad-spotlight {
+  0% { background-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  100% { background-color: transparent; }
+}

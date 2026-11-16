@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in AccountDeck does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. **Never paste tokens, cookies, API keys, the dashboard URL (it carries a token after `#token=`), files from the `vault/` folder, `accounts.sqlite3`, `runtime.json`, an app's credential files such as `~/.codex/auth.json`, or `logs/agy-usage.log` (it can name your email address).**
+
+        For a failed install or update, paste the installer's output under "What happened". It holds no secrets, but its paths show your macOS user name and home folder: replace them (for example with `/Users/NAME`) first.
+
+        A security problem goes through the [security policy](https://github.com/boha-k/accountdeck/security/policy), not an issue.
+
+        The [guide's command line section](https://github.com/boha-k/accountdeck/blob/main/docs/GUIDE.md#command-line) shows how to run `run.py` from an installed copy.
+  - type: input
+    id: version
+    attributes:
+      label: AccountDeck version
+      description: The output of `run.py --version`.
+      placeholder: AccountDeck 2 2.2.0 (...)
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu > About This Mac.
+      placeholder: macOS 15.1
+    validations:
+      required: true
+  - type: dropdown
+    id: app
+    attributes:
+      label: Which app is involved?
+      multiple: true
+      options:
+        - Claude Code (terminals)
+        - Claude Desktop
+        - Codex
+        - Antigravity (agy)
+        - AccountDeck itself (install, update, menu bar, dashboard)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead, as steps someone else can follow.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of run.py --doctor
+      description: It holds no token, cookie or email address. It does name your accounts by their labels in AccountDeck; edit those first if you want.
+      render: text
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Before you submit
+      options:
+        - label: This issue holds no token, cookie, API key, dashboard URL or credential file.
+          required: true

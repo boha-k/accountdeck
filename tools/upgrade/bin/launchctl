@@ -1,0 +1,8 @@
+#!/bin/bash
+# A fake `launchctl` for tools/upgrade_test.sh: no job is ever loaded, so install.sh's start_service falls through to
+# `open` (the fake beside this file) and job_pid finds nothing. Nothing here reaches launchd.
+case "${1-}" in
+print) echo "Could not find service \"${2-}\" in domain for port" >&2; exit 113 ;;
+bootout) exit 0 ;;
+*) echo "fake launchctl: $* (not supported in the upgrade test)" >&2; exit 1 ;;
+esac

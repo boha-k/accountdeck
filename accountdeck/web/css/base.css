@@ -1,0 +1,474 @@
+/* AccountDeck 2 — reset, typography, focus, native-feeling controls, the toolbar and the page shell.
+ * Tokens come from tokens.css. Controls follow macOS 27: capsule push buttons, capsule segmented
+ * controls and pop-up buttons, switches, rounded text fields, an accent focus ring. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--toolbar-height) + 16px);
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--label);
+  font: 400 var(--text-md)/1.4 var(--font);
+  letter-spacing: -.003em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+  accent-color: var(--accent);
+}
+
+h1, h2, h3, h4, p, ul, ol, dl, dd, figure, fieldset { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+fieldset { padding: 0; border: 0; min-width: 0; }
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button { cursor: default; }
+svg { flex: none; }
+[hidden] { display: none !important; }
+
+a { color: var(--accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Every figure, countdown and percentage keeps its width as it changes. */
+.num, time, kbd, output, .tabular { font-variant-numeric: tabular-nums; }
+
+/* The macOS focus ring: accent, outside the control, following its shape. Keyboard focus only. */
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+:focus:not(:focus-visible) { outline: none; }
+::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* ---- Utilities -------------------------------------------------------------------------------- */
+
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  top: -64px;
+  left: 12px;
+  z-index: 60;
+  padding: 6px 14px;
+  border-radius: var(--radius-control);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: 600;
+  transition: top var(--dur) var(--ease);
+}
+.skip-link:focus { top: 10px; text-decoration: none; }
+
+.icon { width: 16px; height: 16px; }
+.icon-20 { width: 20px; height: 20px; }
+.muted { color: var(--label-2); }
+
+/* Section labels: macOS uses sentence case in small semibold secondary text. */
+.eyebrow {
+  color: var(--label-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--fill-2);
+  box-shadow: inset 0 -1px 0 var(--separator);
+  color: var(--label);
+  font: 500 var(--text-sm)/1 var(--font);
+}
+
+/* ---- Push buttons ----------------------------------------------------------------------------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  box-shadow: var(--shadow-control);
+  color: var(--label);
+  font: 500 var(--text-md)/1 var(--font);
+  white-space: nowrap;
+  text-decoration: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background-color var(--dur-fast) var(--ease), opacity var(--dur) var(--ease);
+}
+.button:hover { background: var(--control-hover); text-decoration: none; }
+.button:active:not([disabled]) { filter: brightness(.94); }
+.button .icon { width: 14px; height: 14px; }
+.button[disabled],
+.button[aria-disabled="true"] { opacity: .45; }
+
+/* The default button: the accent, like a Mac's default push button. */
+.button-primary {
+  background: var(--accent-fill);
+  box-shadow: inset 0 .5px 0 rgba(255, 255, 255, .25), 0 1px 2px rgba(0, 0, 0, .15);
+  color: var(--on-accent);
+}
+.button-primary:hover { background: var(--accent-fill-hover); }
+.button-ghost {
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent-text);
+}
+.button-ghost:hover { background: var(--fill-1); }
+/* Destructive: red words on a plain button (macOS hasDestructiveAction). */
+.button-danger { color: var(--red-text); }
+.button-small { height: 24px; padding: 0 11px; font-size: var(--text-sm); }
+.button-large { height: 32px; padding: 0 18px; }
+.button.is-busy { cursor: progress; opacity: .7; }
+
+/* Borderless round buttons: the toolbar and inline icon actions. */
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--label-2);
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.icon-button:hover { background: var(--fill-2); color: var(--label); }
+.icon-button:active { background: var(--fill-3); }
+.icon-button[disabled] { opacity: .4; }
+.icon-button[aria-expanded="true"] { background: var(--fill-3); color: var(--label); }
+.icon-button.is-spinning .icon { animation: ad-spin 1s linear infinite; }
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+.link-button:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---- Segmented control (capsule) -------------------------------------------------------------- */
+
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px;
+  border-radius: var(--radius-control);
+  background: var(--fill-2);
+}
+.segmented > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 56px;
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--label);
+  font-size: var(--text-md);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.segmented > button .icon { width: 14px; height: 14px; color: var(--label-2); }
+.segmented > button:hover:not([aria-checked="true"]):not([aria-pressed="true"]) { background: var(--fill-1); }
+.segmented > button[aria-pressed="true"],
+.segmented > button[aria-checked="true"] {
+  background: var(--knob);
+  box-shadow: 0 0 0 .5px rgba(0, 0, 0, .08), 0 1px 3px rgba(0, 0, 0, .14);
+  color: #1d1d1f;
+}
+.segmented > button[aria-checked="true"] .icon,
+.segmented > button[aria-pressed="true"] .icon { color: #1d1d1f; }
+
+/* ---- Pop-up button (a native <select> in capsule clothing) ------------------------------------ */
+
+.popup { position: relative; display: inline-flex; align-items: center; max-width: 100%; }
+.popup select {
+  height: 28px;
+  max-width: 100%;
+  padding: 0 30px 0 13px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  box-shadow: var(--shadow-control);
+  color: var(--label);
+  font-size: var(--text-md);
+  font-weight: 500;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.popup select:hover { background: var(--control-hover); }
+.popup .popup-chevrons { position: absolute; right: 11px; width: 10px; height: 14px; color: var(--label-2); pointer-events: none; }
+.popup-label { color: var(--label-2); font-weight: 400; }
+
+/* ---- Switch ----------------------------------------------------------------------------------- */
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 11px;
+  background: var(--fill-3);
+  box-shadow: inset 0 0 0 .5px var(--separator);
+  appearance: none;
+  -webkit-appearance: none;
+  transition: background-color var(--dur) var(--ease);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--knob);
+  box-shadow: 0 0 0 .5px rgba(0, 0, 0, .1), 0 1px 3px rgba(0, 0, 0, .25);
+  transition: transform var(--dur) var(--ease-out);
+}
+.switch:checked { background: var(--accent); box-shadow: none; }
+.switch:checked::after { transform: translateX(16px); }
+.switch:disabled { opacity: .45; }
+.switch:focus-visible { outline-offset: 2px; }
+
+/* Checkbox (used where a switch would be wrong, e.g. "Don't ask again"). */
+.check { display: flex; align-items: flex-start; gap: 8px; font-size: var(--text-md); line-height: 1.4; }
+.check input { flex: none; width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--accent); }
+
+/* ---- Text fields and the stepper -------------------------------------------------------------- */
+
+.text-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-field);
+  background: var(--control-bg);
+  box-shadow: inset 0 0 0 .5px var(--separator-strong), inset 0 1px 1px rgba(0, 0, 0, .04);
+  color: var(--label);
+  font-size: var(--text-md);
+}
+.text-input::placeholder { color: var(--label-3); }
+.text-input:focus-visible { outline-offset: 0; }
+.text-input.is-mono { font-family: var(--font-mono); font-size: var(--text-sm); }
+
+.stepper { display: inline-flex; align-items: center; gap: 6px; }
+.stepper input {
+  width: 56px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-field);
+  background: var(--control-bg);
+  box-shadow: inset 0 0 0 .5px var(--separator-strong);
+  color: var(--label);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+.stepper input::-webkit-outer-spin-button,
+.stepper input::-webkit-inner-spin-button { margin: 0; -webkit-appearance: none; }
+.stepper-buttons {
+  display: inline-grid;
+  grid-template-rows: 1fr 1fr;
+  width: 18px;
+  height: 26px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--control-bg);
+  box-shadow: var(--shadow-control);
+}
+.stepper-buttons button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--label-2);
+}
+.stepper-buttons button:hover { background: var(--fill-2); color: var(--label); }
+.stepper-buttons .icon { width: 9px; height: 9px; }
+.stepper-unit { color: var(--label-2); }
+
+/* ---- Toolbar (a unified title bar: title + subtitle, glass button groups) --------------------- */
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: var(--toolbar-height);
+  transition: background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+/* The scroll-edge effect: material appears once content slides under the toolbar. */
+.toolbar.is-scrolled {
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: 0 .5px 0 var(--separator);
+}
+.toolbar-inner {
+  height: 100%;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.app-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.app-icon { width: 28px; height: 28px; flex: none; }
+.app-title-text { display: grid; min-width: 0; }
+.app-name { font: 600 var(--text-lg)/1.15 var(--font-display); letter-spacing: -.01em; white-space: nowrap; }
+.app-subtitle {
+  min-height: 15px;
+  color: var(--label-2);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toolbar-spacer { flex: 1; }
+
+/* Toolbar items sit in glass capsules. */
+.glass-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--glass-rim), 0 1px 4px rgba(0, 0, 0, .06);
+}
+.glass-group .icon-button { width: 30px; height: 30px; color: var(--label); }
+.glass-group .icon-button .icon { width: 17px; height: 17px; }
+
+.status-pills { display: flex; align-items: center; gap: 6px; flex: none; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--radius-control);
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--glass-rim);
+  color: var(--label);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.status-pill a { display: inline-flex; align-items: center; gap: 7px; color: inherit; text-decoration: none; }
+.status-pill a:hover .status-word { text-decoration: underline; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--label-3); }
+.status-pill[data-level="degraded"] .status-dot { background: var(--orange); }
+.status-pill[data-level="outage"] .status-dot { background: var(--red); }
+
+/* ---- Page shell --------------------------------------------------------------------------------- */
+
+.page {
+  width: 100%;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 8px var(--gutter) 32px;
+  display: grid;
+  gap: 16px;
+}
+.page:focus { outline: none; }
+.page > * { min-width: 0; }
+
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.stack:empty { display: none; }
+
+/* Two panes on a wide window: the overview (sticky) beside the accounts. */
+.layout { display: grid; gap: 20px; align-items: start; }
+@media (min-width: 1120px) {
+  .layout { grid-template-columns: var(--overview-width) minmax(0, 1fr); }
+  .layout.is-single { grid-template-columns: minmax(0, 1fr); }
+  .overview {
+    position: sticky;
+    top: calc(var(--toolbar-height) + 8px);
+    max-height: calc(100vh - var(--toolbar-height) - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    border-radius: var(--radius-card);
+  }
+}
+@media (min-width: 1500px) { :root { --overview-width: 392px; } }
+
+.footer {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 4px var(--gutter) 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  color: var(--label-2);
+  font-size: var(--text-sm);
+}
+.footer .link-button { color: var(--label-2); }
+.footer .link-button:hover { color: var(--label); }
+.footer kbd { height: 18px; min-width: 18px; font-size: var(--text-xs); }
+
+/* ---- Responsive --------------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  :root { --gutter: 16px; }
+  .toolbar-inner { gap: 8px; }
+  .status-pill .status-word { display: none; }
+  .app-subtitle { max-width: 46vw; }
+}
+
+/* Forced colours keep every boundary visible. */
+@media (forced-colors: active) {
+  .button, .icon-button, .popup select, .text-input, .stepper input, .segmented, .switch, .glass-group, .status-pill {
+    border: 1px solid CanvasText;
+  }
+  .segmented > button[aria-pressed="true"],
+  .segmented > button[aria-checked="true"] { outline: 2px solid Highlight; }
+  .switch:checked { background: Highlight; }
+  .status-dot { forced-color-adjust: none; background: CanvasText; }
+}
