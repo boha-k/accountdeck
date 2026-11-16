@@ -423,7 +423,9 @@ had back.
   applies one only when a limit it covers has less than 80% left; otherwise nothing is used. The limits it
   refills start a new period, so their reset times move.
 - **Claude:** AccountDeck sends the request itself with that account's saved sign-in: the request Claude
-  Code's `/limit-reset` sends, under AccountDeck's own name. The day the weekly limits reset stays the same,
+  Code's `/limit-reset` sends, under Claude Code's name, as it reads the resets. Anthropic lists an account's
+  resets only to Claude Code and claude.ai, so AccountDeck names itself Claude Code on these two requests and
+  nowhere else. The day the weekly limits reset stays the same,
   and extra usage already billed is not refunded. Anthropic documents its own button for this on claude.ai
   only (Settings → Usage) and may refuse the request from anywhere else; AccountDeck then says "No limit
   reset was used" with the reason. Using your sign-in from a tool beside Anthropic's own apps is your

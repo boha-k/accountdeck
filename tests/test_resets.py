@@ -10,6 +10,8 @@ from tests.helpers import SyntheticTestCase, new_uuid, terminal_login
 
 from accountdeck import diagnostics
 from accountdeck.core import DeckError
+from accountdeck.providers.base import (CLAUDE_CODE_VERSION, OAUTH_PROFILE_URL, OAUTH_USAGE_URL, RESETS_QUERY,
+                                        USER_AGENT)
 from accountdeck.providers.errors import ProviderError
 from accountdeck.providers.fake import FakeCodex, ResetLedger
 from accountdeck.providers.http import request_headers
@@ -254,6 +256,14 @@ class LimitResetTests(SyntheticTestCase):
         self.assertEqual((claim["method"], claim["body"]["program"], claim["body"]["grant_id"]),
                          ("POST", "cedar_ember", "grant_one"))
         self.assertEqual(request_headers(claim["url"], token="t").get("anthropic-beta"), "oauth-2025-04-20")
+        # Anthropic lists grants only to Claude Code: its name goes on the resets read and the claim, and nowhere else.
+        claude_code = f"claude-cli/{CLAUDE_CODE_VERSION} (external, cli)"
+        for url in (claim["url"], OAUTH_USAGE_URL + RESETS_QUERY):
+            self.assertEqual(request_headers(url, token="t")["User-Agent"], claude_code)
+        for url in (OAUTH_USAGE_URL, OAUTH_PROFILE_URL, OAUTH_USAGE_URL + "?cedar_ember=1",
+                    "https://claude.ai/api/organizations/" + new_uuid() + "/usage" + RESETS_QUERY,
+                    "https://api.anthropic.com/api/organizations/" + new_uuid() + "/usage"):
+            self.assertEqual(request_headers(url, token="t")["User-Agent"], USER_AGENT)
 
     def test_a_use_whose_outcome_is_not_known_sends_the_same_key_again_also_after_a_restart(self):
         engine = self.engine()

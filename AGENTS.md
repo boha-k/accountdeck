@@ -130,8 +130,10 @@ copy that is running offers it in its update prompt. Push one only when the main
   `already_used` answering a request sent again). Claude's resets
   read runs only straight after a successful ordinary read of that account, on its route, at most hourly (15
   minutes when the user asked), never with a token that needs renewing, not for 6 hours after a 401, 403, 429
-  or three failures, and not at all with `claude_resets` off. No token is renewed for a reset, and AccountDeck
-  keeps its own User-Agent. No reset id, organisation id, token or request key reaches the state, the log, an
+  or three failures, and not at all with `claude_resets` off. No token is renewed for a reset. The resets read
+  on the OAuth route and the claim go out under Claude Code's User-Agent (`claude-cli/<installed version>
+  (external, cli)`), because Anthropic lists an account's grants to no other client there (maintainer,
+  2026-11-16); every other request keeps AccountDeck's own. No reset id, organisation id, token or request key reaches the state, the log, an
   error text or a process argument.
 - Antigravity data never enters the tables and record names older builds read: its accounts are in
   `antigravity_accounts` (inside schema 2), its vault records are named `agy-…` (never a bare `<32 hex>` or a

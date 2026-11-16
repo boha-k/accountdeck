@@ -607,7 +607,7 @@ def _resets_answer(data, meta):
 def claim_reset(http, token, org, grant_id, request_id):
     """The one request that uses a Claude limit reset, as Claude Code sends it (RS1 §C1): POST
     /api/organizations/<org>/reset_rate_limits with the bearer, the OAuth beta flag (http.request_headers) and
-    {"program": "cedar_ember", "grant_id", "request_id"}; AccountDeck's own User-Agent. Returns (answer or None,
+    {"program": "cedar_ember", "grant_id", "request_id"}; Claude Code's User-Agent (http.request_headers). Returns (answer or None,
     meta); raises ProviderError like any request (its `meta["unsent"]`: certainly never left this Mac)."""
     org = _uuid(org)
     if org is None or not isinstance(grant_id, str) or not isinstance(request_id, str):

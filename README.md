@@ -268,8 +268,8 @@ keychain as `AccountDeck2 vault`; it opens nothing without the data, and Keychai
 - Use it only with accounts that are yours, and within each provider's terms. Google's terms for
   Antigravity do not allow third-party tools to access it; the [guide](docs/GUIDE.md#googles-terms) says
   what AccountDeck does and does not do, so you can decide. Anthropic documents its limit reset button on
-  claude.ai only; [using one from AccountDeck](docs/GUIDE.md#using-one) sends that request with your sign-in
-  under AccountDeck's own name. It shows and switches accounts; it adds no capacity.
+  claude.ai only; AccountDeck reads your resets and [uses one](docs/GUIDE.md#using-one) with your sign-in
+  under Claude Code's name, because Anthropic lists them to no other app. Every other request names AccountDeck. It shows and switches accounts; it adds no capacity.
 - It comes with no warranty (see [LICENSE](LICENSE)). Keep a way to sign in to each account without
   AccountDeck.
 

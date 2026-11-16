@@ -202,7 +202,10 @@ and the `accounts` rows, so none of them can reach it. The state shows it as one
   request key saved in the internal setting `limit_resets`, then one request. Codex: one private
   `codex app-server` session set up as the read-only probe is, `account/rateLimitResetCredit/consume` with
   the credit's id and the key. Claude: one POST to `…/api/organizations/<org>/reset_rate_limits` on
-  `api.anthropic.com` with the account's OAuth token and AccountDeck's own User-Agent.
+  `api.anthropic.com` with the account's OAuth token. This POST and the resets read on the OAuth route carry
+  Claude Code's User-Agent (`claude-cli/<installed version> (external, cli)`, `providers.base.is_reset_request`):
+  to any other client Anthropic answers `ineligible_reason: "surface"` and lists no grants. Every other request
+  keeps AccountDeck's own.
 - **An outcome not known.** A timeout, a lost answer, a 5xx, Claude's `unavailable` or an outcome this build
   does not know leaves the key in place and the account shows `resets.doubt`. The same reset is sent again
   only with that key (Claude: for 10 minutes; Codex: for 24 hours), and a try that fails before the provider

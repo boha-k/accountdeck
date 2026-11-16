@@ -6,6 +6,10 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 
 ## [Unreleased]
 
+- Claude limit resets show and can be used. Anthropic lists an account's resets only to Claude Code and
+  claude.ai, and answered AccountDeck's own name with "claude.ai only", so the resets read and the request that
+  uses one now go out under Claude Code's name (`claude-cli/<installed version> (external, cli)`). Every other
+  request still names AccountDeck.
 - Keep the data saved by 2.2.0 as a synthetic fixture and test future updates against it, including Antigravity sign-ins.
 
 ## [2.2.0] - 2026-11-15
