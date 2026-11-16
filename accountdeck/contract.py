@@ -98,7 +98,7 @@ _SETTING_RULES = {
     "alerts_enabled": ("bool",), "quiet_hours": ("hours",), "notify_reset_minutes": ("int", 1, 180),
     "notifications": ("bool",), "tray": ("bool",), "start_on_login": ("bool",), "cwd": ("text",),
     "log_level": ("choice", ("debug", "info", "warning")), "refresh_paused": ("bool",), "update_check": ("bool",),
-    "agy_usage_on_open": ("bool",), "claude_resets": ("bool",),
+    "agy_usage_on_open": ("bool",), "claude_resets": ("bool",), "auto_reset": ("bool",),
 }
 # Keys that would leak identities or secrets to the browser (PLAN §3.3: uuids never leave the server).
 FORBIDDEN_KEYS = frozenset({"identity", "org", "org_uuid", "organization_uuid", "account_uuid", "uuid", "token",
@@ -921,6 +921,17 @@ def _check_terminal(entry, path, accounts, r):
     _check_usage_shape(entry.get("usage_shape"), path + ".usage_shape", r)
     _check_watch(entry.get("watch"), path + ".watch", r)
     _check_runway(entry.get("runway"), path + ".runway", r)
+    # Automatic limit resets (reset_auto.state): on or off, why they stopped, and the last one. Absent in older states.
+    resetting = entry.get("auto_reset")
+    if resetting is not None and r.obj(resetting, ("enabled", "stopped", "last"), path + ".auto_reset"):
+        r.flag(resetting["enabled"], path + ".auto_reset.enabled")
+        r.text(resetting["stopped"], path + ".auto_reset.stopped", nullable=True)
+        used = resetting["last"]
+        if used is not None and r.obj(used, ("account", "label", "at"), path + ".auto_reset.last"):
+            if not any(a["id"] == used["account"] and a["provider"] == "claude_cli" for a in accounts):
+                r.add(path + ".auto_reset.last.account", "must be a terminal account")
+            r.text(used["label"], path + ".auto_reset.last.label")
+            r.num(used["at"], path + ".auto_reset.last.at", nullable=False)
     auto = entry["autoswitch"]
     if r.obj(auto, ("enabled", "threshold", "order_mode", "early_switch", "next_up", "last", "hold"), path + ".autoswitch"):
         r.flag(auto["enabled"], path + ".autoswitch.enabled")

@@ -41,7 +41,8 @@ ENV_BACKOFF, ENV_CAP, ENV_KEPT = 60.0, 900.0, 1800.0
 ALERT_EVERY = 3600.0      # a failure that goes on is told again this often
 APPS = {"claude": "Claude Desktop", "codex": "Codex", "claude_cli": "terminal", "antigravity": "Antigravity"}
 JOBS = {"add": "sign-in", "finish-login": "sign-in", "cancel-login": "sign-in", "capture": "save", "recover": "recovery",
-        "remove": "account removal", "open": "launch", "stop-consumer": "session stop", "import-bundle": "import"}
+        "remove": "account removal", "open": "launch", "stop-consumer": "session stop", "import-bundle": "import",
+        "use-reset": "limit reset"}
 # The switches a Codex or Claude Desktop job still waiting for sessions to finish gives way to: the active account
 # reached the threshold, is out or needs sign-in (or the terminals leave an all-low stretch). Never an early one.
 NEEDED = frozenset({"threshold", "out", "login", "refilled"})
@@ -55,11 +56,14 @@ def _forecast(engine, row, now):
     planned = engine.scheduler.planned(row["id"])
     wait = engine.scheduler.governor.delay(("claude_cli", row["identity"]), now, urgent=True)
     horizon = min(max((planned or now) - now, wait, 0.0) + FORECAST_MARGIN, FORECAST_CAP)
+    # Only readings since the terminals came to this account, and none from before the Mac last slept: a rate from
+    # when it was last in use, or from before a sleep in which nothing was used, says nothing about now.
+    came = cli_policy.number(engine.store.setting("cli_history", {}).get("left_at"))
+    since = max([now - cli_policy.FORECAST_SPAN - 600, *(at for at in (came, engine.woke_at) if at is not None and at <= now)])
     result = {}
     for window in (row["last_good_usage"] or {}).get("windows", []):
         if isinstance(window, dict) and isinstance(window.get("id"), str):
-            value = cli_policy.forecast(engine.store.readings(row["id"], window["id"], since=now - cli_policy.FORECAST_SPAN - 600),
-                                        now, horizon)
+            value = cli_policy.forecast(engine.store.readings(row["id"], window["id"], since=since), now, horizon)
             if value is not None:
                 result[window["id"]] = value
     return result
@@ -106,7 +110,8 @@ def _hold(engine):
     still waiting for sessions to finish, which a needed switch cancels: OperationRunner.preempt). An open
     Add terminal account window holds nothing: its sign-in has its own folder and Keychain item
     (CLIAccounts.begin_enrollment). Nor does a Claude Desktop or Codex switch waiting for Recover: only an
-    interrupted terminal switch (or a record that cannot be read) does."""
+    interrupted terminal switch (or a record that cannot be read) does. After an automatic limit reset it waits, two
+    minutes at most, for the reading that shows the room (reset_auto.awaited)."""
     if not engine.owns_login:
         return "Another AccountDeck 2 is managing your sign-ins", False
     if engine.cli.adapter.readonly_reason:
@@ -120,6 +125,10 @@ def _hold(engine):
     failed = engine.store.setting("cli_history", {}).get("environment")
     if isinstance(failed, dict) and failed.get("until", 0) > engine.clock():     # no job gives way to a switch that cannot run
         return f"{str(failed.get('why')).rstrip('.')}. Next try in {cli_policy.duration(failed['until'] - engine.clock())}.", False
+    from . import reset_auto          # it imports this module
+    refilling = reset_auto.awaited(engine, engine.clock())
+    if refilling is not None:         # a switch decided now would go by what the limit reset has just changed
+        return f"Reading {refilling} again after its limit reset", False
     if engine.runner.busy:
         what = _job(engine.runner.pending())
         if engine.runner.yields():

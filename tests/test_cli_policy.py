@@ -46,6 +46,14 @@ def ultra(key, weekly, **extra):
     return row
 
 
+def fable(key, weekly, own, **extra):
+    """An Ultra account that also reports Fable's own weekly limit, as Claude names it today."""
+    row = ultra(key, weekly, **extra)
+    row["windows"].append({"id": "seven_day_fable", "kind": "model", "model": "Fable", "label": "Fable 5.1 weekly",
+                           "used": own, "reset": NOW + 3 * DAY})
+    return row
+
+
 def meter(kind, percent=100.0, scope=None, **row):
     return {"kind": kind, "percent": percent, "resets_at": RESET, "scope": scope, **row}
 
@@ -167,9 +175,9 @@ class TerminalPolicyTests(unittest.TestCase):
 
     def test_a_new_meter_holds_and_moves_terminals_and_a_codename_does_not(self):
         target = ultra("beta", 10)
-        fable = {"model": {"display_name": "Fable"}}
+        opus = {"model": {"display_name": "Opus"}}
         for row, pinned in ((meter("burst"), ""), (meter("burst", scope={"surface": {"display_name": "Claude Code"}}), ""),
-                            (meter("burst", scope=fable), "Fable")):
+                            (meter("burst", scope={"model": {"display_name": "Fable"}}), ""), (meter("burst", scope=opus), "Opus")):
             moved = decide([answered("alpha", row, active=True), target], pinned_model=pinned)
             self.assertEqual((moved["action"], moved["target"], moved["kind"]), ("switch", "beta", "out"), row)
             skipped = decide([ultra("alpha", 96, active=True), answered("gamma", row)], pinned_model=pinned)
@@ -178,12 +186,64 @@ class TerminalPolicyTests(unittest.TestCase):
         # Past the threshold it moves them as any limit does, under the server's own label.
         scoped = meter("burst", 96.0, {"surface": {"display_name": "Claude Code"}, "model": None}, group="daily")
         self.assertIn("Claude Code daily", decide([answered("alpha", scoped, active=True), target])["reason"])
-        for row in (meter("burst", scope={"surface": {"display_name": "Cowork"}}), meter("burst", scope=fable)):
+        for row in (meter("burst", scope={"surface": {"display_name": "Cowork"}}), meter("burst", scope=opus)):
             self.assertEqual(decide([answered("alpha", row, active=True), target])["action"], "none", row)
         # A codename window limits[] does not list is no limit, whatever its percentage.
         codename = {"iguana_necktie": {"utilization": 100.0, "resets_at": RESET}}
         self.assertEqual(decide([answered("alpha", top=codename, active=True), target])["action"], "none")
         self.assertIsNone(decide([ultra("alpha", 96, active=True), answered("gamma", top=codename)])["next_up"][1]["skip"])
+
+    def test_the_fable_weekly_limit_holds_the_terminals_whatever_is_pinned(self):
+        # With no model pinned, an account out of Fable was "healthy" (weekly 40%), so nothing moved and the next
+        # account chosen could be out of Fable too.
+        moved = decide([fable("alpha", 40, 96, active=True), fable("gone", 10, 100, weekly_reset=DAY), fable("beta", 30, 20)])
+        self.assertEqual((moved["action"], moved["target"], moved["kind"]), ("switch", "beta", "threshold"))
+        self.assertIn("Fable weekly", moved["reason"])
+        self.assertEqual(next(r for r in moved["next_up"] if r["id"] == "gone")["skip"], "Fable weekly at 100%")
+        self.assertEqual(decide([fable("alpha", 40, 100, active=True), fable("beta", 30, 20)])["kind"], "out")
+        # Every account out of Fable only: said so, as the terminals still work for other models, and the account in
+        # use is not left for another one that is out of Fable too.
+        low = decide([fable("alpha", 40, 100, active=True), fable("beta", 30, 100)])
+        self.assertEqual((low["action"], low["exhausted"], low["all_low"]), ("none", True, True))
+        self.assertTrue(low["reason"].startswith("All terminal accounts are low on their Fable weekly limit; other models"))
+        both = decide([fable("alpha", 99, 99, active=True), fable("beta", 98, 98)])
+        self.assertTrue(both["reason"].startswith("All terminal accounts are low."))
+        # An account whose week is spent works for no model: it is left for one whose week has room.
+        spare = decide([fable("alpha", 100, 20, active=True), fable("beta", 30, 100), fable("gamma", 20, 100, health="needs_signin")])
+        self.assertEqual((spare["action"], spare["target"], spare["kind"], spare["read_first"]), ("switch", "beta", "out", False))
+
+    def test_the_users_own_choice_holds_against_the_threshold_until_99(self):
+        # Undo, or a switch in AccountDeck, to an account past the threshold was reversed on the next tick.
+        chosen = {"manual_at": NOW - 600, "manual_for": "alpha"}
+        target = account("beta", 10, 10)
+        held = decide([account("alpha", 10, 96, active=True), target], history=chosen)
+        self.assertEqual(held["action"], "none")
+        self.assertIn("You chose Alpha", held["hold"])
+        for row in (account("alpha", 10, 99, active=True), account("alpha", 10, 96, active=True, forecast={"seven_day": 99.5})):
+            moved = decide([row, target], history=chosen)
+            self.assertEqual((moved["action"], moved["target"]), ("switch", "beta"))
+        self.assertEqual(decide([account("alpha", 10, 100, active=True), target], history=chosen)["kind"], "out")
+        self.assertEqual(decide([account("alpha", 10, 96, active=True, health="needs_signin"), target], history=chosen)["kind"], "login")
+        # Not once the 2 hours are over, nor for another account than the one chosen.
+        for other in ({"manual_at": NOW - 3 * HOUR, "manual_for": "alpha"}, {"manual_at": NOW - 600, "manual_for": "beta"}):
+            self.assertEqual(decide([account("alpha", 10, 96, active=True), target], history=other)["action"], "switch")
+
+    def test_the_early_switch_never_trades_places_nor_follows_an_automatic_switch(self):
+        active = account("alpha", 10, 30, active=True, weekly_reset=10 * HOUR)
+
+        def early(reset, history=None):
+            return decide([active, account("beta", 10, 20, weekly_reset=reset)], history=history, cli_early_switch=True)
+        # Two accounts with one reset time, reported a second apart, moved the terminals back and forth.
+        self.assertEqual(early(10 * HOUR - 1)["action"], "none")
+        self.assertEqual(early(9 * HOUR + 60)["action"], "none")
+        moved = early(8 * HOUR)
+        self.assertEqual((moved["action"], moved["target"], moved["kind"]), ("switch", "beta", "early"))
+        # Not within 2 hours of any automatic switch (its Undo was gone within seconds), nor of the user's choice.
+        after = early(8 * HOUR, {"last": {"kind": "threshold", "at": NOW - HOUR}})
+        self.assertEqual(after["action"], "none")
+        self.assertIn("automatic switch", after["hold"])
+        self.assertEqual(early(8 * HOUR, {"manual_at": NOW - HOUR, "manual_for": "gamma"})["action"], "none")
+        self.assertEqual(early(8 * HOUR, {"last": {"kind": "threshold", "at": NOW - 3 * HOUR}})["action"], "switch")
 
     def test_a_lock_counts_only_on_a_limit_that_holds_terminals(self):
         reason = {"locked_reason": "Locked for this account."}
@@ -293,12 +353,12 @@ class LimitErrorTests(SyntheticTestCase):
     def reading(self, key, used):
         self.engine.store.observe(key, claude_usage({"seven_day": {"utilization": used, "resets_at": RESET}}, now=self.now), at=self.now)
 
-    def error_at(self, at):
-        """Claude Code writes a weekly-limit error, and the watcher and the tick see it."""
-        info = {"status": "rejected", "rateLimitType": "seven_day", "resetsAt": int(at + 5 * DAY)}
+    def error_at(self, at, limit="weekly", kind="seven_day"):
+        """Claude Code writes a limit error (the weekly one unless named), and the watcher and the tick see it."""
+        info = {"status": "rejected", "rateLimitType": kind, "resetsAt": int(at + 5 * DAY)}
         line = {"type": "assistant", "isApiErrorMessage": True, "error": "rate_limit", "apiErrorStatus": 429,
                 "timestamp": dt.datetime.fromtimestamp(at, dt.timezone.utc).isoformat(), "apiErrorParams": {"rate_limit_info": info},
-                "message": {"content": [{"type": "text", "text": "You've hit your weekly limit · resets Nov 7 at 12pm (America/Denver)"}]}}
+                "message": {"content": [{"type": "text", "text": f"You've hit your {limit} limit · resets Nov 7 at 12pm (America/Denver)"}]}}
         with open(self.transcript, "ab") as handle:
             handle.write(json.dumps(line, separators=(",", ":")).encode() + b"\n")
         self.engine.watch.transcripts.poll()
@@ -356,6 +416,29 @@ class LimitErrorTests(SyntheticTestCase):
         self.engine.sense_active()
         self.engine.watch.tick()                  # it stood against alpha, not against the account now in use
         self.assertFalse(self.out())
+
+    def test_a_fable_limit_error_counts_with_no_model_pinned(self):
+        # It was "unwatched" unless Fable was pinned: the terminals stayed on an account that refused every message.
+        self.now += 10
+        self.error_at(self.now - 1, "Fable", "seven_day_overage_included")
+        self.assertTrue(self.out())
+        self.assertEqual(cli_auto.decision(self.engine)["target"], self.bravo)
+        self.now += 10
+        self.reading(self.alpha, 40)              # no Fable limit in it: it shows no room there
+        self.assertTrue(self.out())
+
+    def test_the_forecast_forgets_readings_from_before_the_terminals_came_or_the_mac_slept(self):
+        # An account last in use at 40% that came back at 90% looked as if it burned 50 points in minutes.
+        def projected():
+            return next(row for row in cli_auto.inputs(self.engine) if row["active"])["forecast"]
+        self.now += 900
+        self.reading(self.alpha, 90)
+        self.assertGreater(projected()["seven_day"], 90)
+        self.engine.store.set_setting("cli_history", {"left_at": self.now - 300})
+        self.assertEqual(projected(), {})
+        self.engine.store.set_setting("cli_history", {})
+        self.engine.woke_at = self.now - 300
+        self.assertEqual(projected(), {})
 
     def test_auto_switch_never_returns_to_an_account_left_at_a_limit(self):
         # Every read fails, so the out fallback goes by last good readings, and those predate the limit errors.

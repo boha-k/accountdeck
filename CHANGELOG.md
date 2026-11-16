@@ -6,11 +6,39 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 
 ## [Unreleased]
 
+### Added
+
+- **Use a limit reset when every terminal account is out**, a setting in Settings → Auto-Switch, off unless
+  you turn it on. When every terminal account auto-switch could use is at 97 % or more of its weekly or Fable
+  weekly limit, AccountDeck uses one Claude Code limit reset by itself: on the account in use when it holds
+  one that fits (a Fable reset when only Fable is out, a weekly one when the week is), else on another
+  account, where auto-switch then moves the terminals. One at a time: never while another action runs or an
+  outcome is not known, never before a reading shows the refill, and at most one an hour. If a reset does
+  not refill its limit, automatic resets stop with an alert until you turn the setting off and on. Each use
+  is told as a report, a line in Recent activity and a notification. Codex and Claude Desktop resets are
+  never used automatically, and an account you left out of auto-switch is never reset.
+
+### Changed
+
 - Claude limit resets show and can be used. Anthropic lists an account's resets only to Claude Code and
   claude.ai, and answered AccountDeck's own name with "claude.ai only", so the resets read and the request that
   uses one now go out under Claude Code's name (`claude-cli/<installed version> (external, cli)`). Every other
   request still names AccountDeck.
 - Keep the data saved by 2.2.0 as a synthetic fixture and test future updates against it, including Antigravity sign-ins.
+- Auto-switch always counts Fable's weekly limit, whatever model is pinned (Settings already said so). An
+  account at your threshold on Fable is left, one that is out of Fable is no target, and a "You've hit your
+  Fable limit" error in a terminal moves the terminals. Before, with no model pinned, an account out of Fable
+  looked healthy: nothing moved, and the next account could be out of Fable too. When Fable is all that is
+  low everywhere, the alert says so ("other models still have room"), and an account that works for no model
+  at all is left for one whose week has room.
+- Your own choice stands. After **Undo**, or a switch you make in AccountDeck, auto-switch leaves the terminals
+  on that account for 2 hours even past your threshold, until a reading says 99 %. A limit reached or a login
+  that ends still moves them. Before, the threshold switch could reverse your choice on the next check.
+- The early switch ("Use weekly allowance before it resets") only moves to an account whose week ends more
+  than an hour sooner, and never within 2 hours of another automatic switch. Two accounts with the same reset
+  time no longer trade places.
+- The burn-rate forecast counts only readings since the terminals came to the account and since the Mac last
+  woke, so an account that comes back fuller than it was left no longer looks as if it is filling fast.
 
 ### Fixed
 

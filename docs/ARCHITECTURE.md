@@ -64,6 +64,7 @@ check hangs.
 | Antigravity | `agy_accounts.py`, `providers/antigravity.py`, `web/js/antigravity.js` | the fourth app, kept apart from the providers ([below](#antigravity)): its saved accounts, usage on request, Add, Sign In Again, Rename, Remove and Recover; `agy`'s Keychain item, its usage answer and where `agy` is installed; its section of the dashboard |
 | Switching | `switching.py`, `operations.py`, `switch_cli.py`, `cli_locks.py`, `switch_claude.py`, `stop_ladder.py`, `claude_verify.py`, `switch_codex.py`, `switch_antigravity.py` | plan, consent and dispatch shared by all apps; the operation runner; one flow per app |
 | Terminal auto-switch | `cli_policy.py`, `cli_auto.py`, `cli_watch.py` | the decision (pure), acting on it, and reading Claude Code's transcripts for limit errors (read-only) |
+| Limit resets | `resets.py`, `reset_auto.py` | what each account holds, Claude's resets read and the one operation that uses a reset; when a reset is used automatically (off by default, [below](#limit-resets)) |
 | Storage | `core.py`, `config.py` | user-facing errors, atomic writes, the encrypted vault with its generation ring, the SQLite store (schema 2, Antigravity's own table, integrity check, daily backups, restore), write-ahead file transactions, the owner lock; paths, settings and safe mode |
 | Processes | `procs.py`, `platform/libproc.py`, `platform/procs_mac.py`, `activity.py` | process rows, classification and consent, and AccountDeck's own runs of `agy`, each ended at its time limit; read-only libSystem facts; the one place a signal is sent to a program AccountDeck did not start, and the Terminal windows it opens; which of Claude Desktop's Code sessions are working |
 | Platform | `platform/appkit.py`, `menubar.py`, `statusbar_mac.py`, `dashboard_window.py`, `notify_mac.py`, `autostart_mac.py`, `keychain.py`, `credstore.py`, `facts_mac.py`, `locks.py` | the ctypes Objective-C bridge, the menu bar, the WKWebView window, notifications, the LaunchAgent, the Keychain through `/usr/bin/security`, Claude Code's login store, Mac facts |
@@ -87,8 +88,9 @@ check hangs.
    changes. The dashboard polls it; the menu bar re-reads it every 5 s.
 6. `AlertEngine` compares the previous and the new state and raises each alert once per episode;
    `Notifier` delivers it to the page and to macOS notifications.
-7. On the same tick `cli_auto` feeds `cli_policy.evaluate`, and a decision to move the terminals becomes
-   a terminal switch job.
+7. On the same tick, with the `auto_reset` setting on, `reset_auto` looks whether every terminal account is
+   out and starts the use of one limit reset; then `cli_auto` feeds `cli_policy.evaluate`, and a decision
+   to move the terminals becomes a terminal switch job.
 
 None of this reaches Antigravity, whose usage is read only when the user asks ([below](#antigravity)).
 
@@ -213,14 +215,32 @@ and the `accounts` rows, so none of them can reach it. The state shows it as one
   with that key may just have gone through). A reading settles it: the count down means used (a use that finds this
   in its own last look sends nothing more), still there after the key's time means not used. A count the
   provider left out is never taken for zero.
+- **An automatic use.** `reset_auto.py` (the setting `auto_reset`, off by default, and only with
+  `cli_autoswitch` and `claude_resets` on) runs on the tick just before auto-switch. `due` (pure) takes the rows
+  auto-switch decides on (`cli_auto.inputs`) and says whether every account of the terminal pool is at the bar
+  (97 %, or the switch point when higher) in its weekly or Fable weekly limit, by readings at most 15 minutes
+  old; an unknown reading means no, and that account is read again. `choose` takes the rows `reset-plan` would
+  offer (`Resets.usable_rows`) and picks one that refills every limit holding its account back: the account in
+  use first, then the least reset that suffices, the earliest expiry, auto-switch's order.
+  `Resets.use_automatically` starts the same `ResetOperation`, which asks `confirm` once more right before the
+  request; `confirm` writes `last` (account, time, limits, `open`, `unsure`) to the memory first, as the request
+  key is written. Afterwards `reset_auto.finished` (from `engine._record_outcome`) records the outcome, the
+  event and the alert. The next tick waits for a reading of that account: under the bar closes `last`; still at
+  the bar 10 minutes or more after the reset sets `stopped`, which only turning the setting off and on clears.
+  An outcome not known keeps `unsure` until the request key settles (`Resets._auto_verdict`). Auto-switch waits
+  up to 2 minutes for that reading (`reset_auto.awaited` in `cli_auto._hold`), so the two never act on the same
+  stale numbers; while the operation runs, auto-switch is held like under any other job. The state gets
+  `providers.claude_cli.auto_reset` (`enabled`, `stopped`, `last`).
 - **A damaged memory.** `clean_memory` drops whatever is not in the shape this module writes when the service
-  starts, and the state's view of an account's resets never raises.
+  starts, and the state's view of an account's resets never raises. A damaged `auto` part counts as `stopped`:
+  what held the next automatic reset back is gone.
 - **One Claude account in two apps.** Matching identity and organization link their pending uses. An unresolved
   use blocks the other entry and removing either entry; retrying stays on the original entry. Complete reads
   from either entry can settle it, and confirmed uses update both cached counts. Incomplete reads keep the
   request after its retry window. Failed setting writes restore the last committed in-memory state.
 - **What it keeps.** The internal setting `limit_resets`: per account Claude's last block with its grant ids,
-  the read's timing, and an open request key. No table, no vault record; it never reaches the state or
+  the read's timing, and an open request key; and `auto`, what `reset_auto` remembers (`last`, `failed`,
+  `stopped`; an older build drops it unread). No table, no vault record; it never reaches the state or
   `/api/settings`.
 
 ## Rules nothing may break

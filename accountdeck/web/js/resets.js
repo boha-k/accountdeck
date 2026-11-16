@@ -1,5 +1,7 @@
 /* AccountDeck 2 — limit resets: what a Claude Code, Claude Desktop or Codex account holds (accounts[].resets and its
- * reset_credits rows), and Use a Limit Reset….
+ * reset_credits rows), and Use a Limit Reset…. With the auto_reset setting on (Settings › Auto-Switch, off by default)
+ * the service also uses one by itself when every terminal account is out; this page then only shows its progress and
+ * its report, whose summary says that AccountDeck used it by itself and why.
  *   The count    — a chip on the account's row and on the In use card ("2 limit resets"), quiet while none can be
  *                  used now; while a use is in doubt (resets.doubt), a sentence stands in its place.
  *   The details  — the account's Limit Resets sheet: one line per row, a row's reason when it can't be used, the

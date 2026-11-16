@@ -27,8 +27,8 @@ import threading
 import time
 import tomllib
 
-from . import (__version__, activity, alerts, cli_auto, contract, diagnostics, intel, move_import, switch_claude,
-               switch_cli, switching, updates)
+from . import (__version__, activity, alerts, cli_auto, contract, diagnostics, intel, move_import, reset_auto,
+               switch_claude, switch_cli, switching, updates)
 from . import BUILD, doctor
 from .accounts import AccountService, default_label, restorable
 from .agy_accounts import AgyService
@@ -235,7 +235,8 @@ class Engine:
         self._shape_lock, self._shape_keys = threading.Lock(), set()
         self._doctor_report, self._doctor_thread, self._doctor_due = None, None, real_monotonic() + DOCTOR_FIRST
         self._started_at = real_monotonic()
-        self._wall, self._last_heartbeat = real_time(), clock()
+        self._wall, self._mono, self._last_heartbeat = real_time(), real_monotonic(), clock()
+        self.woke_at = None                  # the engine's time when the Mac last woke from sleep (`_check_resume`)
         self._previous_state, self._alerts_rev, self._invalid_logged = None, None, False
         self.tray_handle = None              # the menu bar item while it shows (run.py, update_settings)
         self.sense_active()
@@ -622,6 +623,9 @@ class Engine:
         phase("runway", self._refresh_runway, now)
         phase("doctor", self._doctor_tick)
         phase("verifiers", self._tick_verifiers, now)
+        # Before auto-switch: with every terminal account out, a limit reset comes first (the setting `auto_reset`),
+        # and auto-switch then waits for the reading that shows the room.
+        phase("autoreset", reset_auto.tick, self)
         phase("autoswitch", cli_auto.tick, self)
         phase("tidy", self._tidy, now)
         phase("convert", self._convert_deferred, now)
@@ -725,9 +729,13 @@ class Engine:
         self._wake.set()
 
     def _check_resume(self, now):
-        wall = self.real_time()
+        wall, mono = self.real_time(), self.real_monotonic()
         jumped = wall - self._wall > 3 * self.tick_seconds
-        self._wall = wall
+        # The wall clock ran on while the monotonic one stood still: the Mac slept (a tick that only took long is no
+        # sleep, and usage went on under it). The burn-rate forecast forgets the readings from before (cli_auto).
+        if (wall - self._wall) - (mono - self._mono) > WATCHDOG_GAP:
+            self.woke_at = now
+        self._wall, self._mono = wall, mono
         if jumped:
             self._read_baseline = self.real_monotonic()
             self.scheduler.resume(now)
@@ -950,6 +958,7 @@ class Engine:
                                         enrollment=copy.deepcopy(self.cli.phase),
                                         readonly_reason=self.cli.adapter.readonly_reason,
                                         usage_shape=shape_change(self.store.setting("usage_shapes"), "claude_cli", now))
+        providers["claude_cli"]["auto_reset"] = reset_auto.state(self)
         providers["claude_cli"]["runway"] = self._runway
         providers["claude_cli"]["watch"] = self.watch.state(now)
         providers["claude_cli"]["signin_due"] = alerts.signin_due(accounts, now)
@@ -1143,6 +1152,8 @@ class Engine:
             self._show_menu_bar(changed["tray"])
         if "update_check" in changed:
             self.updates.wake()
+        if "auto_reset" in changed:
+            reset_auto.rearm(self)           # off and on again is how the user starts it after it stopped itself
         if changed.get("claude_resets"):
             keys = [row["id"] for row in self.store.accounts() if row["provider"] in ("claude", "claude_cli")]
             now = self.clock()
@@ -1407,9 +1418,11 @@ class Engine:
         """`settled`: what `auto_recover` did as this job ended."""
         if getattr(op, "preempted", None) and report["outcome"] == "cancelled":
             cli_auto.made_way(self, op)
-        # A use of a limit reset records its own line: who, which reset, the outcome (resets.ResetOperation).
+        # A use of a limit reset records its own line: who, which reset, the outcome (resets.ResetOperation). An
+        # automatic one tells of itself (reset_auto.finished: its event, its alert, what the next tick waits for).
+        told = reset_auto.finished(self, op, report, now)
         summary = diagnostics.redact_text(getattr(op, "event_text", None) or report["summary"] or "")
-        if report["outcome"] in ("success", "failed") and op.kind != "remove" and summary and summary != "Done.":
+        if not told and report["outcome"] in ("success", "failed") and op.kind != "remove" and summary and summary != "Done.":
             self.store.event(op.kind, summary)
         if report.get("manifest"):
             self.store.set_setting("last_manifest", report["manifest"])

@@ -349,6 +349,10 @@ SETTINGS_SCHEMA = {
     # "Read Claude limit resets": after a successful usage read of a Claude account, at most hourly (every 15 minutes
     # when the user asked), one more read of its limit resets (accountdeck/resets.py). Codex's come with every reading.
     "claude_resets": Setting("bool", True),
+    # "Use a limit reset when every terminal account is out": with auto-switch and `claude_resets` on, one Claude Code
+    # limit reset is used by itself once every terminal account auto-switch could use is at 97 % or more
+    # (accountdeck/reset_auto.py). Off unless the user turns it on: a limit reset cannot be taken back.
+    "auto_reset": Setting("bool", False),
     "recommender_state": Setting("object", {}, internal=True),
     "alert_latches": Setting("object", {}, internal=True),
     "update_memory": Setting("object", {}, internal=True),       # updates.load_memory: what the check remembers
