@@ -49,6 +49,13 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   installed and still opens at login.
 - An account paused by a provider incident says so once on its row, not twice. A limit's countdown with no room
   left ends in dots instead of stopping mid-word. The user guide now says the early switch is on by default.
+- Cancel pressed just as a job reaches a step that cannot be stopped now cancels the job, instead of being
+  accepted and then ignored.
+- An account's row stops saying it is being checked as soon as the check has ended, and a new reading shows
+  without waiting for Claude's limit resets to be read.
+- Terminal auto-switch keeps deciding when a stored number is far too large to use (a damaged setting or
+  reading), and noting which Claude Desktop or Codex account is in use no longer drops a note a usage check
+  wrote at the same moment.
 
 ## [2.2.0] - 2026-11-15
 

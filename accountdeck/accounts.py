@@ -581,13 +581,15 @@ class AccountService:
 
     def touch_active(self, provider, identity, now):
         """Notes that a saved account is the signed-in one (`flags.last_active_at`, renewed hourly):
-        the dashboard's "unused for N days" hint reads it."""
-        account = self.store.find(provider, identity)
-        if account is None or is_frozen(account):
-            return
-        last = account["flags"].get("last_active_at")
-        if last is None or now - last >= ACTIVE_TOUCH:
-            self.store.update(account["id"], flags={**account["flags"], "last_active_at": now})
+        the dashboard's "unused for N days" hint reads it. The flags are read and written back under the store's
+        lock, which every write takes, so no flag another thread writes in between is lost."""
+        with self.store.lock:
+            account = self.store.find(provider, identity)
+            if account is None or is_frozen(account):
+                return
+            last = account["flags"].get("last_active_at")
+            if last is None or now - last >= ACTIVE_TOUCH:
+                self.store.update(account["id"], flags={**account["flags"], "last_active_at": now})
 
     # ---- the unsaved signed-in account (§9.4) ----
     def sense_unsaved(self, provider, identity):

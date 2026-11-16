@@ -128,8 +128,9 @@ class RefreshScheduler:
     """`run(account_id)` reads one account and returns the outcome: "ok", "rate_limited",
     "outage" or any other failure kind (it must not raise)."""
 
-    def __init__(self, run, *, workers=WORKERS, rng=random.random, governor=None, inline=False):
+    def __init__(self, run, *, workers=WORKERS, rng=random.random, governor=None, inline=False, done=None):
         self.run = run
+        self.done = done             # called once a read has ended and its plan says so (no longer `running`)
         self.rng = rng
         self.governor = governor or RequestGovernor()
         self.inline = inline
@@ -264,6 +265,8 @@ class RefreshScheduler:
                                       acct=diagnostics.account_ref(target.id))
         finally:
             self.completed(target, outcome, clock())
+            if self.done is not None:
+                self.done()
 
     def completed(self, target: Target, outcome: str, now: float) -> None:
         with self._lock:

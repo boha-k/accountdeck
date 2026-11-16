@@ -200,7 +200,8 @@ class Engine:
         self.identity_known = {name: False for name in self.providers}
         self.background_verifiers = []
         self.closers = []                    # called once by stop(), e.g. a Codex sign-in helper
-        self.scheduler = RefreshScheduler(self._read_tracked, inline=inline)
+        # The page hears of a read's end too: the state built at the read's own bump still shows it running.
+        self.scheduler = RefreshScheduler(self._read_tracked, inline=inline, done=self.bump)
         self.accounts = AccountService(self.store, self.vault, self.providers, self.prefs, clock=clock,
                                        observed=self.observed, levels=self.levels,
                                        lock_for=self.scheduler.account_lock,
@@ -539,6 +540,7 @@ class Engine:
             return result
         finally:
             self._record_read(provider, result)
+            self.bump()                      # the page sees the new reading now, not after Claude's resets read
             self.resets.after_read(key, provider, result)      # Claude's resets read when due; it never raises
             self._watch_shape(provider, key, row)
             self._read_once.add(key)
