@@ -25,6 +25,9 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   middle) no longer leaves Claude signed in to the account the switch was moving to.
 - A Claude Desktop switch, Add or Recover now stops with nothing changed when Claude is opened again while
   AccountDeck is working, instead of replacing Claude's sign-in files while it runs.
+- When Claude or OpenAI asks AccountDeck to wait before checking usage again, the wait is now at most an hour
+  and 15 minutes. One answer asking for years could pause an account's checks, its Refresh and auto-switch to
+  it for that long. A longer pause saved by an earlier version ends at the next start.
 
 ## [2.2.0] - 2026-11-15
 

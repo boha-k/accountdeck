@@ -48,6 +48,7 @@ from .providers import make_providers
 from .providers.antigravity import Antigravity
 from .providers.claude_cli import ClaudeCLI, expires
 from .providers.codex import Codex
+from .providers.errors import RATE_LIMIT_MARGIN, RETRY_AFTER_CAP
 from .providers.status import ObservedStatus, StatuspageStatus, StatuspageSummary
 from . import runway
 from .rules import REFILL_KEEP
@@ -216,6 +217,7 @@ class Engine:
             self.cli.adopt_stashes()
             self.cli.restore_enrollment()
         if self.owns_login:
+            self.store.cap_pauses(RETRY_AFTER_CAP + RATE_LIMIT_MARGIN)
             self.accounts.settle_renewals()
             try:
                 self.agy.recover_at_start()
