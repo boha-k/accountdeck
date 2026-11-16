@@ -52,13 +52,22 @@ for script in install.sh uninstall.sh get.sh tools/*.sh; do
     if [ "$script" = get.sh ] && [ ! -f get.sh ]; then continue; fi       # get.sh is new; an older tree has none
     bash -n "$script" || { echo "FAIL: $script has a syntax error" >&2; exit 1; }
 done
+# The dashboard's JavaScript: with node when it is installed, else with the JavaScriptCore shell every Mac has (the
+# engine of the app's own window).
+JSC=/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc
+js_syntax=()
 if command -v node >/dev/null 2>&1; then
+    js_syntax=(node --check)
+elif [ -x "$JSC" ]; then
+    js_syntax=("$JSC" -e "checkSyntax(arguments[0])" --)
+fi
+if [ "${#js_syntax[@]}" -gt 0 ]; then
     for script in accountdeck/web/js/*.js; do
-        node --check "$script" || { echo "FAIL: $script has a syntax error" >&2; exit 1; }
+        "${js_syntax[@]}" "$script" || { echo "FAIL: $script has a syntax error" >&2; exit 1; }
     done
     echo "shell and dashboard syntax: PASS"
 else
-    echo "shell syntax: PASS; dashboard syntax: skipped (no node here)"
+    echo "shell syntax: PASS; dashboard syntax: skipped (no node or jsc here)"
 fi
 # A workflow file that is not valid YAML fails as a run of its own, which no pull request shows; release.yml would
 # first say so on a release tag.

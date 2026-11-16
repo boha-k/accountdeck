@@ -122,7 +122,8 @@ Another action in progress holds auto-switch until it finishes, except a Claude 
 Antigravity switch still waiting for sessions to close: a switch your terminals need (threshold, limit
 reached or sign-in; never an early switch) cancels it before anything changed and tells you to start it
 again. Alerts say why no account can take over, and the dashboard says why auto-switch is paused. The
-optional early switch spends weekly allowance expiring within 24 hours. **Leave Out of Auto-Switch** in an
+early switch, on by default (**Use weekly allowance before it resets** in Settings → Auto-Switch), spends
+weekly allowance expiring within 24 hours. **Leave Out of Auto-Switch** in an
 account's **More** (⋯) menu excludes it (**Let Auto-Switch Use It** takes it back); after an automatic
 switch **Undo** is available for 10 minutes.
 

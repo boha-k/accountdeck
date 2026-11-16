@@ -47,6 +47,8 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   sign-in was not saved.
 - `uninstall.sh` stopped because AccountDeck was still running no longer turns off Open at login: the app stays
   installed and still opens at login.
+- An account paused by a provider incident says so once on its row, not twice. A limit's countdown with no room
+  left ends in dots instead of stopping mid-word. The user guide now says the early switch is on by default.
 
 ## [2.2.0] - 2026-11-15
 

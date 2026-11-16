@@ -125,7 +125,10 @@
     list.push(AD.resets.chip(account, 'row'));         // the limit resets it holds; null without any
     const error = account.error;
     if (error && !A.blocked(account)) {
-      if (error.outage) list.push(AD.meter.badge('neutral', STRINGS.chip.incident, { icon: 'pause' }));
+      // An incident the status line already names (detailLines) is said once.
+      if (error.outage) {
+        if ((account.headline || {}).kind !== 'outage') list.push(AD.meter.badge('neutral', STRINGS.chip.incident, { icon: 'pause' }));
+      }
       else if (error.code === 'blocked') list.push(AD.meter.badge('neutral', STRINGS.chip.cloudflare, { title: error.message }));
       else if (error.code !== 'rate_limited') {
         list.push(AD.meter.badge('critical', STRINGS.chip.error, { title: AD.format.errorText(error.code, error.message) }));
