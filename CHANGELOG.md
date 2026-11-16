@@ -32,6 +32,8 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
   Codex accounts.
 - A saved terminal account can be removed while Claude Code is signed out. Before, Remove failed with "The
   terminal login file is missing."
+- The dashboard no longer shows two terminal accounts in use, or none, when a switch or a Remove ends at the
+  moment the page is updated.
 
 ## [2.2.0] - 2026-11-15
 
