@@ -502,6 +502,7 @@ class AutomaticResetTests(SyntheticTestCase):
         super().setUp()
         self.clock = [time.time()]
         self.ledger, self.owners, self.levels, self.ids, self.stuck = ResetLedger(), {}, {}, {}, False
+        self.ends = {}                       # identity -> when its limits reset by themselves (FAR unless set)
         identity = new_uuid()
         self.sign_in_terminal(*self.login("alpha", identity))
         self.engine = self.start()           # saves the login in use by itself
@@ -539,11 +540,12 @@ class AutomaticResetTests(SyntheticTestCase):
         if not self.stuck:                   # a reset that worked: the limits it refills read as unused
             level[0] = 0.0 if "seven_day" in cleared else level[0]
             level[1] = 0.0 if FABLE in cleared and level[1] is not None else level[1]
+        ends = self.ends.get(identity, FAR)
         limits = [meter for meter in (
-            {"kind": "weekly_all", "percent": level[0], "resets_at": FAR},
-            {"kind": "weekly_scoped", "percent": level[1], "resets_at": FAR, "scope": {"model": {"display_name": "Fable"}}})
+            {"kind": "weekly_all", "percent": level[0], "resets_at": ends},
+            {"kind": "weekly_scoped", "percent": level[1], "resets_at": ends, "scope": {"model": {"display_name": "Fable"}}})
             if meter["percent"] is not None]
-        return claude_usage({"five_hour": None, "seven_day": {"utilization": level[0], "resets_at": FAR}, "limits": limits},
+        return claude_usage({"five_hour": None, "seven_day": {"utilization": level[0], "resets_at": ends}, "limits": limits},
                             now=self.clock[0])
 
     def read(self, *keys, after=0):
@@ -611,6 +613,49 @@ class AutomaticResetTests(SyntheticTestCase):
         self.assertEqual(self.look(), ["a_weekly"])
         self.read(self.alpha, beta, after=1900)
         self.assertEqual(self.look(), ["a_weekly", "a_second"])
+
+    def test_nothing_is_used_on_numbers_a_reset_changed_or_that_change_by_themselves(self):
+        engine = self.engine
+        beta = self.add("beta")
+        self.have(self.alpha, 99, grants=[weekly_grant("a_weekly")])
+        self.have(beta, 98, grants=[weekly_grant("b_weekly")])
+        self.read()
+        # The user's own reset on alpha, and the setting turned on before alpha is read again: its reading is from
+        # before that reset and says nothing now. Without this, beta's reset went too.
+        plan = engine.action("reset-plan", {"id": self.alpha})["plan"]
+        engine.action("use-reset", {"id": self.alpha, "plan_id": plan["plan_id"], "choice": plan["default"]})
+        self.assertEqual(self.finish(), ["a_weekly"])
+        self.clock[0] += 30
+        engine.update_settings({"auto_reset": True})
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.stuck = True                    # nor does a reading right after it that still says 99%: it may lag
+        self.read(self.alpha, after=5)
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.stuck = False
+        # A switch point of 99: auto-switch moves the terminals to no account above 97%, so beta at 98% has no room
+        # for them, and the account in use counts from the user's own switch point.
+        engine.update_settings({"cli_threshold": 99})
+        self.have(self.alpha, 98)
+        self.read(after=601)
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.have(self.alpha, 100)
+        self.read(self.alpha, after=1)
+        self.assertEqual(self.look(), ["a_weekly", "b_weekly"])
+        self.read(beta, after=5)
+        self.assertEqual(self.look(), ["a_weekly", "b_weekly"])
+        self.assertFalse(engine.resets.auto()["last"]["open"])
+        # Out again an hour later, and beta's week ends by itself in five minutes: that is waited for.
+        self.have(beta, 99, grants=[weekly_grant("b_second")])
+        self.ends[self.ids[beta]] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(self.clock[0] + 3700 + 300))
+        self.read(after=3700)
+        self.assertEqual(self.look(), ["a_weekly", "b_weekly"])
+        # Not soon any more, but Anthropic now says that reset refills Fable's limit only: the last look, which asks
+        # again what it refills, uses nothing.
+        del self.ends[self.ids[beta]]
+        self.read(after=1)
+        self.ledger.claude[self.ids[beta]]["grants"][0]["clears"] = [FABLE]
+        self.assertEqual(self.look(), ["a_weekly", "b_weekly"])
+        self.assertEqual(engine.resets.auto()["failed"]["account"], beta)      # it tried, and stopped at the last look
 
     def test_the_reset_that_fits_is_used_fable_for_fable_and_another_accounts_when_the_one_in_use_has_none(self):
         engine = self.engine

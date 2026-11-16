@@ -9,11 +9,14 @@ on the engine's tick thread only, just before auto-switch.
 When (`due`, pure). Only Claude Code accounts count, and only with auto-switch (`cli_autoswitch`) and `claude_resets`
 on. The pool is the account in use plus every account auto-switch could move the terminals to: not left out, not
 frozen, signed in, not on hold, not locked by Claude, its login not about to end. An account is out when its weekly
-limit or Fable's weekly limit is at the bar (97 %, or the user's switch point when that is higher), by a reading at
-most 15 minutes old, and that limit's reset is still ahead. A reset that passed since the reading counts as room. An
-account whose reading cannot say (none, too old, a percentage or a reset time missing) is "not known": nothing is
-used, and it is read again. The 5-hour limit, another model's limit and a meter of a new kind never make an account
-out, but one that is at the bar too must be refilled by the same reset (`fitting`).
+limit or Fable's weekly limit is at the bar, by a reading at most 15 minutes old, and that limit's reset is still
+ahead. The bar is 97 %; for the account in use it is the user's switch point when that is higher (`bar`). A reset
+that passed since the reading counts as room, and a limit that refills by itself within REFILL_SOON (10 minutes) is
+waited for. An account whose reading cannot say is "not known": nothing is used, and it is read again. That is a
+reading that is missing, too old or without a percentage or a reset time, and one that shows the account out but was
+taken before a limit reset AccountDeck used on that account (the user's own included) or under 10 minutes after it.
+The 5-hour limit, another model's limit and a meter of a new kind never make an account out, but one that is at the
+bar too must be refilled by the same reset (`fitting`).
 
 Which (`choose`). A reset fits when it is one `reset-plan` would offer now (`Resets.usable_rows`: usable, nothing
 blocking) and refills every limit that holds the account back. The account in use comes first: the terminals then
@@ -32,13 +35,18 @@ when, which limits, `open` until a reading settled it, `unsure` while it is not 
 (tries in a row that used nothing) and `stopped`. `last` is written before the request is sent, as the request key
 is, so a failure after it can never lead to a second reset.
 """
+import math
+
 from . import cli_auto, cli_policy, diagnostics, rules
 from .core import DeckError, is_frozen
 
-BAR = 97                  # an account is out with this much of a limit used, or more
+# An account is out with this much of a limit used, or more. Also the most auto-switch moves the terminals to
+# (cli_policy.DRAIN_CEILING - DRAIN_ROOM): from here on no switch helps.
+BAR = 97
 FRESH = 900.0             # a reading older than this says nothing of now (auto-switch's own age for a target)
 GAP = 3600.0              # at least this long between two automatic resets
 REFILL_GRACE = 600.0      # a reading this long after a reset that still shows its limit out: it did not refill it
+REFILL_SOON = 600.0       # a limit that refills by itself this soon is waited for (as auto-switch waits for a 5-hour one)
 RETRY, RETRY_CAP = 600.0, 3600.0     # after a try that used nothing
 READING_WAIT = 120.0      # auto-switch waits this long for the reading after an automatic reset
 WEEKLY, FABLE = "seven_day", "seven_day_overage_included"     # Claude's names of the two limits in a grant's `clears`
@@ -47,9 +55,12 @@ STOPPED = ("AccountDeck stopped using limit resets by itself: the last one did n
            "AccountDeck remembered of it could not be read. Turn this setting off and on to start again.")
 
 
-def bar(settings):
-    """The percentage from which an account counts as out: never below the user's own switch point."""
-    threshold = cli_policy.number(settings.get("cli_threshold"))
+def bar(settings, active=True):
+    """The percentage from which an account counts as out. The account in use: never below the user's own switch
+    point, where auto-switch first looks for another account. Any other: BAR whatever the switch point, as
+    auto-switch moves the terminals to no account above it (an account between BAR and a higher switch point would
+    otherwise be neither switched to nor reset)."""
+    threshold = cli_policy.number(settings.get("cli_threshold")) if active else None
     return max(BAR, threshold if threshold is not None else BAR)
 
 
@@ -59,13 +70,14 @@ def limit_key(window):
 
 
 def out_limits(windows, read_at, pinned, level, now):
-    """The limits holding the terminals that a reading taken at `read_at` shows at `level` or more, by Claude's names:
-    [] when all have room, None when the reading cannot say (no weekly limit in it, a percentage missing, or a limit
-    that is out with no reset time ahead). A limit whose reset passed since the reading has room."""
+    """The limits holding the terminals that a reading taken at `read_at` shows at `level` or more: {Claude's name of
+    the limit: when it resets by itself}, empty when all have room; None when the reading cannot say (no weekly limit
+    in it, a percentage missing, or a limit that is out with no reset time ahead). A limit whose reset passed since
+    the reading has room."""
     windows = [w for w in windows or () if isinstance(w, dict)]
     if read_at is None or not any(w.get("kind") == "weekly" for w in windows):
         return None
-    found = []
+    found = {}
     for window in windows:
         if not rules.holds_terminals(window, pinned) or cli_policy.refilled(window, now, read_at):
             continue
@@ -77,7 +89,7 @@ def out_limits(windows, read_at, pinned, level, now):
         if used >= level:
             if ends is None or ends <= now:
                 return None
-            found.append(limit_key(window))
+            found[limit_key(window)] = max(ends, found.get(limit_key(window), ends))
     return found
 
 
@@ -93,25 +105,33 @@ def in_pool(account, settings, now):
     return ends is None or ends - now >= (cli_policy.LOGIN_ACTIVE if active else cli_policy.LOGIN_FALLBACK)
 
 
-def due(accounts, settings, now):
+def due(accounts, settings, now, used=None):
     """Whether a limit reset is called for, from the rows auto-switch decides on (cli_auto.inputs). Pure.
-    {"due", "bar", "out": {account id: [limits out]} when due, "refresh": [ids to read again], "why"}: `why` is
-    "room" when an account has room, "unknown" when a reading cannot say, "nobody" without an account to judge."""
-    level = bar(settings)
-    result = {"due": False, "bar": level, "out": {}, "refresh": [], "why": "nobody"}
+    {"due", "out": {account id: [limits out]} when due, "refresh": [ids to read again], "why"}: `why` is "room" when
+    an account has room, "soon" when one refills by itself within REFILL_SOON, "unknown" when a reading cannot say,
+    "nobody" without an account to judge. `used` (Resets.used_at): {account id: when a limit reset was last used on
+    it through AccountDeck}; a reading that shows the account out cannot say when it was taken before that reset, or
+    less than REFILL_GRACE after it (usage may lag behind a reset)."""
+    result = {"due": False, "out": {}, "refresh": [], "why": "nobody"}
     active = next((account for account in accounts if account.get("active")), None)
     if active is None or is_frozen(active):
         return result
-    pinned, out, unknown = settings.get("pinned_model"), {}, []
+    pinned, out, unknown, soon = settings.get("pinned_model"), {}, [], False
     for account in accounts:
         if not in_pool(account, settings, now):
             continue
-        age = cli_policy.reading_age(account, now)
-        limits = None if age is None or age > FRESH else out_limits(account.get("windows"), now - age, pinned, level, now)
+        age, limits = cli_policy.reading_age(account, now), None
+        if age is not None and age <= FRESH:
+            limits = out_limits(account.get("windows"), now - age, pinned, bar(settings, account.get("active")), now)
         if limits is None:
             unknown.append(account)
         elif WEEKLY in limits or FABLE in limits:
-            out[account["id"]] = limits
+            if now - age - (used or {}).get(account["id"], -math.inf) < REFILL_GRACE:
+                unknown.append(account)      # read before a reset used on it, or so soon after that usage may lag
+                continue
+            out[account["id"]] = list(limits)
+            # What makes it out refills by itself within minutes: the account then has room without a reset.
+            soon = soon or max(limits[key] for key in (WEEKLY, FABLE) if key in limits) - now <= REFILL_SOON
         else:
             return {**result, "why": "room"}
     if not out:
@@ -122,6 +142,8 @@ def due(accounts, settings, now):
         refresh = [account["id"] for account in unknown
                    if not (cli_policy.number(account.get("paused_until")) or 0) > now]
         return {**result, "refresh": refresh, "why": "unknown"}
+    if soon:
+        return {**result, "why": "soon"}
     return {**result, "due": True, "out": out, "why": None}
 
 
@@ -217,7 +239,7 @@ def _settled(engine, last, now):
         return False
     settings = engine.prefs.public()
     still = out_limits((row["last_good_usage"] or {}).get("windows"), read_at, settings.get("pinned_model"),
-                       bar(settings), now)
+                       bar(settings, row["identity"] == engine.active_identity.get("claude_cli")), now)
     if still is None:
         return False
     left = [limit for limit in last["limits"] if limit in still]
@@ -245,9 +267,14 @@ def awaited(engine, now):
     return _label(row)
 
 
+def enabled(prefs):
+    """The three settings an automatic reset needs."""
+    return bool(prefs.get("auto_reset") and prefs.get("cli_autoswitch") and prefs.get("claude_resets"))
+
+
 def tick(engine):
     prefs, resets = engine.prefs, engine.resets
-    if not (prefs.get("auto_reset") and prefs.get("cli_autoswitch") and prefs.get("claude_resets")):
+    if not enabled(prefs):
         return
     now = engine.clock()
     auto = resets.auto()
@@ -266,7 +293,7 @@ def tick(engine):
     if failed and now - failed["at"] < _retry_in(failed):
         return
     accounts, settings = cli_auto.inputs(engine), prefs.public()
-    found = due(accounts, settings, now)
+    found = due(accounts, settings, now, resets.used_at())
     for key in found["refresh"]:
         engine.scheduler.request(key, now)
     if not found["due"]:
@@ -279,20 +306,23 @@ def tick(engine):
     if picked is None:
         return                         # auto-switch's own alert says that every account is low
     row, chosen, limits = picked
-    key, level = row["id"], found["bar"]
+    key = row["id"]
 
     def confirm():
-        """Asked on `ad2-ops` right before the request (the last look took a moment): still called for? Then `last`
-        goes to disk first, as the request key does."""
-        again = due(cli_auto.inputs(engine), engine.prefs.public(), engine.clock())
-        if not (engine.prefs.get("auto_reset") and again["due"] and set(limits) <= set(again["out"].get(key, ()))):
+        """Asked on `ad2-ops` right before the request (the last look took a moment): still called for, still
+        switched on, the account still not left out? Then `last` goes to disk first, as the request key does."""
+        rows = cli_auto.inputs(engine)
+        again = due(rows, engine.prefs.public(), engine.clock(), resets.used_at())
+        left_out = any(account["id"] == key and account.get("excluded") for account in rows)
+        if not (enabled(engine.prefs) and again["due"] and not left_out
+                and set(limits) <= set(again["out"].get(key, ()))):
             automatic["dropped"] = True
             return False
         resets.set_auto(last={"account": key, "at": engine.clock(), "limits": list(limits), "open": True, "unsure": True})
         automatic["marked"] = True
         return True
 
-    automatic = {"confirm": confirm, "why": f"every terminal account was at {level:g}% or more", "limits": list(limits),
+    automatic = {"confirm": confirm, "why": f"every terminal account was at {BAR}% or more", "limits": list(limits),
                  "marked": False, "dropped": False}
     try:
         resets.use_automatically(row, chosen, automatic)

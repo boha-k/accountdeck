@@ -393,6 +393,8 @@ def clean_memory(stored) -> dict:
                 kept["pending"] = entry["pending"]
             else:
                 diagnostics.log("resets.memory_dropped", "warning", acct=diagnostics.account_ref(key), what="pending")
+        if _number(entry.get("used")):
+            kept["used"] = entry["used"]
         if kept:
             clean[key] = kept
     auto = auto_ok(stored.get("auto") if isinstance(stored, dict) else None)
@@ -487,6 +489,18 @@ class Resets:
         """Whether any account's request key is open: a use whose outcome is not known yet."""
         with self.lock:
             return any((entry.get("pending") or {}).get("sent") for entry in self.memory["accounts"].values())
+
+    def used_at(self):
+        """{account id: when a limit reset was last used on it through AccountDeck, by the user or automatically}
+        (`_note_used`). A reading that is not newer shows the account as it was before that reset."""
+        with self.lock:
+            return {key: entry["used"] for key, entry in self.memory["accounts"].items() if _number(entry.get("used"))}
+
+    def _note_used(self, row, now):
+        """Caller holds the lock and saves. A limit reset was used on this Claude account, whichever of its app
+        entries it was used from."""
+        for member in self._members(row):
+            self._entry(member["id"])["used"] = now
 
     def open_request(self, row):
         return bool(self._pending(row))
@@ -630,6 +644,8 @@ class Resets:
             self._entry(key).pop("pending", None)
             self._auto_verdict(key, verdict, now)
             verdicts.append(verdict)
+        if "used" in verdicts:
+            self._note_used(row, now)
         return "used" if "used" in verdicts else "unused" if verdicts else None
 
     def _settle_codex(self, row, credits, now):
@@ -1092,6 +1108,9 @@ class Resets:
                 if not found["usable"] or _shown(found) != _shown(chosen):
                     # Also a count that is not the one confirmed.
                     raise _unused(op, row, title, _stale(op, CHANGED), "stale_plan")
+                # An automatic use was chosen for the limits this reset refills: by Anthropic's fresh answer too.
+                if op.automatic is not None and not set(op.automatic["limits"]) <= set(grant["clears"]):
+                    raise _unused(op, row, title, AUTO_STALE, "stale_plan")
             with op.step("send", phase="saving", message="Using the limit reset…", cancellable=False):
                 op.checkpoint()               # a Cancel that came while the step began: nothing is sent
                 # An automatic use: is it still called for, now that the look is done? (reset_auto.tick)
@@ -1172,6 +1191,7 @@ class Resets:
                         grant["left"] = min(grant["left"], before - 1)
             self._entry(row["id"]).pop("pending", None)
             self._auto_verdict(row["id"], "used", self.engine.clock())
+            self._note_used(row, self.engine.clock())
             self._save()
 
     # -- the request key --
