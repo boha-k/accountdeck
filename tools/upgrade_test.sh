@@ -5,7 +5,7 @@
 #
 #     tools/upgrade_test.sh [--downloads DIR]
 #
-# Part 1, under --prefix (no service). For 2.0.0 and 2.1.0 (the tree of the tag vX.Y.Z when it resolves, installed
+# Part 1, under --prefix (no service). For each older release (the tree of the tag vX.Y.Z when it resolves, installed
 # with its own install.sh; otherwise this tree with its version line rewritten): install the old version, put a
 # released version's data folder in place (tests/fixtures/*X.Y.Z*.zip when there is one, else baseline-data.zip,
 # which 2.0.0 wrote), hash every file of the data folder (all but the installer's and a service's own), install this
@@ -79,6 +79,8 @@ for path in sorted((data / "vault").glob("*.dpapi")):
     read += 1
 missing = [row["id"] for row in rows if row["owner"] == "v2" and not row["flags"].get("deferred_desktop")
            and not (data / "vault" / (row["id"] + ".dpapi")).exists()]
+missing.extend(row["id"] for row in store.agy_accounts()
+               if not (data / "vault" / ("agy-" + row["id"] + ".dpapi")).exists())
 assert not missing, "accounts without their saved sign-in: %s" % missing
 print(len(rows), read)
 PYTHON
@@ -232,7 +234,10 @@ put_fixture() {   # put_fixture ROOT ZIP: the released data folder, as the old v
 rows_in() {   # rows_in ROOT: account rows in the data folder's database, read without changing it
     py "$1" -c 'import sqlite3, sys, urllib.parse
 db = sqlite3.connect("file:%s?mode=ro&immutable=1" % urllib.parse.quote(sys.argv[1] + "/accounts.sqlite3"), uri=True)
-print(db.execute("SELECT count(*) FROM accounts").fetchone()[0])' "$(support "$1")"
+total = db.execute("SELECT count(*) FROM accounts").fetchone()[0]
+if sys.argv[2] == "all" and db.execute("SELECT 1 FROM sqlite_master WHERE name = ?", ("antigravity_accounts",)).fetchone():
+    total += db.execute("SELECT count(*) FROM antigravity_accounts").fetchone()[0]
+print(total)' "$(support "$1")" "${2:-legacy}"
 }
 
 health_of() {   # health_of ROOT: the version the service answering for ROOT reports, or down
@@ -287,7 +292,7 @@ read_everything() {   # read_everything ROOT ROWS: this build's code on the inst
 }
 
 part1_update() {   # part1_update OLD: install OLD, put its data in place, update to this build
-    local old=$1 root="$T/p1-$1" tree="$T/src-$1" log="$T/logs/p1-$1" data rows before snap backup origin fixture mode
+    local old=$1 root="$T/p1-$1" tree="$T/src-$1" log="$T/logs/p1-$1" data rows total before snap backup origin fixture mode
     origin=$(old_tree "$old" "$tree") || { why "no $old tree"; return 1; }
     install_old "$root" "$tree" "$log.old" || { show "$log.old"; why "$old ($origin) did not install"; return 1; }
     [ "$(version_in "$(support "$root")/app")" = "$old" ] || why "the old install is not $old" || return 1
@@ -295,13 +300,14 @@ part1_update() {   # part1_update OLD: install OLD, put its data in place, updat
     put_fixture "$root" "$fixture" || why "the fixture ${fixture##*/} could not be put in place" || return 1
     data=$(support "$root")
     rows=$(rows_in "$root") || why "the fixture's rows could not be counted" || return 1
+    total=$(rows_in "$root" all) || return 1
     before=$(data_hash "$root")
     echo "    $old from $origin, data from ${fixture##*/} ($rows account rows)"
 
     hermetic bash "$REPO/install.sh" --prefix "$root" --no-launch --skip-tests ${DL[@]+"${DL[@]}"} > "$log" 2>&1 \
         || { show "$log"; why "the update from $old failed"; return 1; }
     said "$log" "Updating AccountDeck 2 from $old to $NEW" || return 1
-    said "$log" "All $rows saved accounts are still here" || return 1
+    said "$log" "All $total saved accounts are still here" || return 1
     [ "$(data_hash "$root")" = "$before" ] || why "a data file changed" || return 1
     [ "$(version_in "$data/app")" = "$NEW" ] || why "app/ is not $NEW" || return 1
     backup=$(newest "$data/app-backups" "*-v$old")
@@ -587,8 +593,10 @@ part2_agy_lost() {   # part2_agy_lost ROOT: a new version that loses an Antigrav
 
 echo "AccountDeck 2 upgrade test: this build is $NEW (temporary folder $T)"
 echo "Part 1: updates under --prefix"
-run "update 2.0.0 -> $NEW keeps every account (data unchanged, backups, snapshot, all rows and records read)" part1_update 2.0.0
-run "update 2.1.0 -> $NEW keeps every account (data unchanged, backups, snapshot, all rows and records read)" part1_update 2.1.0
+for old in 2.0.0 2.1.0 2.2.0; do
+    [ "$old" != "$NEW" ] || continue
+    run "update $old -> $NEW keeps every account (data unchanged, backups, snapshot, all rows and records read)" part1_update "$old"
+done
 run "a second run of the same build changes nothing" part1_second_run
 run "--prefix without --no-launch opens nothing and does not ask launchd" part1_prefix_opens_nothing
 run "an install while another holds the lock stops with nothing changed; a stale lock does not block" part1_lock
