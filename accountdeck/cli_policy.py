@@ -416,7 +416,7 @@ def evaluate(accounts, settings, history, now):
     early = [row for row in eligible if row["weekly_reset"] is not None and active_reset is not None
              and 0 < row["weekly_reset"] - now <= 24 * HOUR and row["weekly_reset"] < active_reset - HOUR
              and row["values"][1][1] <= 80
-             and not (row["id"] == history.get("left") and now - history.get("left_at", -1e20) < 1800)]
+             and not (row["id"] == history.get("left") and now - (number(history.get("left_at")) or -1e20) < 1800)]
     if not early:
         return result
     # Not right after another automatic switch (a threshold switch's Undo would be gone within seconds), nor

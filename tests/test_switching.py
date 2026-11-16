@@ -19,7 +19,7 @@ from accountdeck.providers import claude_cli
 from accountdeck.providers.claude_cli import ClaudeCLI
 from accountdeck.providers.errors import ProviderError
 from accountdeck.providers.http import register_test_host, request, unregister_test_host
-from accountdeck.switch_cli import perform
+from accountdeck.switch_cli import CLISwitch, perform
 from accountdeck.usage import claude_usage
 
 LOGIN_DAYS = 20          # what the scripted token endpoint says is left of a renewed login
@@ -95,6 +95,10 @@ class TerminalSwitchTests(SyntheticTestCase):
         self.assertEqual(recover_transactions(self.engine.vault), [])
         # The user's choice is kept with the account chosen: auto-switch leaves it alone up to 99% (cli_policy).
         self.assertEqual(self.engine.store.setting("cli_history")["manual_for"], self.beta_key)
+        # It ends once auto-switch has moved the terminals on: back on beta by themselves later, they are not held there.
+        self.engine.submit(CLISwitch(self.engine, self.alpha_key, kind="threshold", reason="beta reached 95%"))
+        self.assertTrue(self.engine.runner.wait(10))
+        self.assertNotIn("manual_for", self.engine.store.setting("cli_history"))
 
     def test_a_target_login_that_cannot_be_renewed_never_reaches_claude_code(self):
         before = self.live_bytes()

@@ -464,6 +464,9 @@ class CLISwitch(Operation):
                     if history.get("last"):
                         history["last"]["undo_until"] = now
                 else:
+                    # The choice held while the terminals stayed on the account chosen: one they come back to by
+                    # themselves is left at the switch point like any other.
+                    history.pop("manual_for", None)
                     history["last"] = {"from": previous, "to": self.account, "at": now, "kind": self.auto_kind,
                         "reason": self.reason, "undo_until": now + 600}
                     if self.auto_kind == "early":
