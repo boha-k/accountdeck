@@ -1241,8 +1241,9 @@ UNFINISHED = ("prepared", "conflict", "verifying")      # a transaction in one o
 
 def recover_transactions(vault, unreadable=None):
     """The keys of transactions a switch left unfinished (prepared, verifying or conflict), which the
-    Recover action puts right; finished ones older than 30 days, a terminal conflict Recover closed ("kept")
-    among them, are deleted. DeckError("vault") when a record cannot be read (the caller treats that as a
+    Recover action puts right; finished ones older than 30 days are deleted, among them a terminal or Codex
+    conflict Recover closed with the login the app holds now ("kept") and the record of a Recover cut short
+    ("superseded"). DeckError("vault") when a record cannot be read (the caller treats that as a
     pending recovery too), unless `unreadable` is a list: (key, error) of such a record then goes there and
     the scan goes on. Antigravity's records (`agy-transaction-`) are never among them: every build would block
     all switching on one, so Antigravity keeps and settles its own (`Vault.agy_transaction_keys`)."""

@@ -7,7 +7,7 @@ import json
 import sqlite3
 
 from . import cli_auto, diagnostics
-from .cli_accounts import ON_HOLD, TargetError
+from .cli_accounts import DISAGREE, ON_HOLD, TargetError
 from .cli_locks import config_lock, credential_locks
 from .cli_policy import DRAIN_CEILING, considered
 from .rules import plan_current, plan_target
@@ -310,8 +310,7 @@ def perform(service, key):
                         # `mirror` already asked counts, so no network call runs under these locks; an owner not
                         # known yet does not stop the switch (an outage of that endpoint would stop every one).
                         if service.owners.get(outgoing["fingerprint"]) not in (None, outgoing["identity"]):
-                            raise DeckError("Claude Code's account and login disagree. Wait for sign-in to finish.",
-                                            "identity")
+                            raise DeckError(DISAGREE, "identity")
                         # Its cross-check refuses a login another record holds rather than wait for that key lock.
                         previous = service.save(outgoing, source="sync-back", drop=False)
                 composed = merge(target["credentials"], credentials)
@@ -365,7 +364,7 @@ def repair(service, key):
                 raise
             found = None
         if found not in (None, row["identity"]):
-            raise DeckError("Claude Code's account and login disagree. Wait for sign-in to finish.", "identity")
+            raise DeckError(DISAGREE, "identity")
         store = service.adapter.store
         tx = CLITransaction(service)
         with _undoing(service, tx):

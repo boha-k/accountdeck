@@ -751,7 +751,10 @@ def _limit_resets(v):
             return [_check("resets.held", "warn", text + " Automatic limit resets stopped themselves: the last one did "
                            "not refill its account.",
                            "Turn “Use a limit reset when every terminal account is out” off and on in Settings.")]
-        text += " Automatic limit resets are on."
+        waits = [name for key, name in (("cli_autoswitch", "auto-switch"), ("claude_resets", "reading Claude's limit resets"))
+                 if v.store.setting(key, True) is False]
+        text += (f" Automatic limit resets are on but do nothing while {' and '.join(waits)} {'are' if len(waits) > 1 else 'is'} off."
+                 if waits else " Automatic limit resets are on.")
     return [_check("resets.held", "ok", text)]
 
 

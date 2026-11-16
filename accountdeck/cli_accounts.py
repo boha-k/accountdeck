@@ -41,6 +41,9 @@ REFUSED = "Claude refused this terminal login twice. Sign in again to repair thi
 LIVE_REFUSED = "Claude refused the login your terminals hold. The other login saved for this account is kept."
 LIVE_LOST = "Your terminals lost this account's login. AccountDeck is giving them the login saved here."
 RECOVERING = "An interrupted switch is not settled yet, so this terminal login is not renewed yet. Its last reading is kept."
+# A /login caught half way (its token is written before the account's name), or one that ended there.
+DISAGREE = ("Claude Code's account and login disagree. If a sign-in is running in a terminal, let it finish; "
+            "if not, run /login in a terminal again.")
 LIVE_RECORD = "cli-live"      # the vault record of `_live`
 
 
@@ -373,7 +376,7 @@ class CLIAccounts:
                     with self.gate(row["id"]):
                         self._drop_foreign(row["id"], saved["fingerprint"])
                     continue
-                raise DeckError("Claude Code's account and login disagree. Wait for sign-in to finish.", "identity")
+                raise DeckError(DISAGREE, "identity")
         return live
 
     def save(self, incoming, *, source="capture", drop=True):
