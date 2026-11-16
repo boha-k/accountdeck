@@ -486,9 +486,11 @@ class Resets:
             auto.pop("last", None)
 
     def any_open_request(self):
-        """Whether any account's request key is open: a use whose outcome is not known yet."""
+        """Whether any Claude account's request key is open: a use whose outcome is not known yet. A Codex one (open
+        for up to a day) says nothing about a Claude account."""
         with self.lock:
-            return any((entry.get("pending") or {}).get("sent") for entry in self.memory["accounts"].values())
+            return any((pending := entry.get("pending") or {}).get("sent") and pending.get("provider") in CLAUDE
+                       for entry in self.memory["accounts"].values())
 
     def used_at(self):
         """{account id: when a limit reset was last used on it through AccountDeck, by the user or automatically}

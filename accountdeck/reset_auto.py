@@ -25,10 +25,11 @@ when only Fable is out), then the one that expires first, then auto-switch's own
 terminals there once a reading shows the room.
 
 One at a time. Nothing is used while another job runs (it never makes one give way), while auto-switch itself is
-held, while any account's request key is open, before a reading of the account shows how the last automatic reset
-went, within GAP (1 hour) of it, or within RETRY (10 minutes, doubling to an hour) of a try that used nothing. A
-reading taken REFILL_GRACE (10 minutes) or more after a reset that still shows its limit at the bar stops automatic
-resets, with an alert, until the user turns the setting off and on.
+held, while any Claude account's request key is open, before a reading of the account shows how the last automatic
+reset went, within GAP (1 hour) of it, or within RETRY (10 minutes, doubling to an hour) of a try that used nothing.
+A reading taken REFILL_GRACE (10 minutes) or more after a reset that still shows its limit at the bar stops automatic
+resets, with an alert, until the user turns the setting off and on. How the last one went is settled also while the
+setting is off (`tick`), so that turning it on later never judges an old reset by a new week's reading.
 
 What it remembers is the `auto` part of resets.py's memory (`Resets.auto`, `Resets.set_auto`): `last` (the account,
 when, which limits, `open` until a reading settled it, `unsure` while it is not known whether it was used), `failed`
@@ -217,10 +218,11 @@ def _stop(engine, row, left, now):
     engine.bump()
 
 
-def _settled(engine, last, now):
+def _settled(engine, last, now, judge=True):
     """Whether a reading has shown how the last automatic reset went, so that another may follow. A reading taken
     after it that shows its limits under the bar settles it; one taken REFILL_GRACE or more after it that still shows
-    one at the bar stops automatic resets (`_stop`). Until then it waits: usage may lag behind a reset."""
+    one at the bar stops automatic resets (`_stop`). Until then it waits: usage may lag behind a reset. Without
+    `judge` (automatic resets are off, or stopped already) nothing is left to stop, and that reading only closes it."""
     resets, key = engine.resets, last["account"]
     row = engine.store.account(key)
     if row is None:                    # removed since: nothing is left to wait for
@@ -251,6 +253,10 @@ def _settled(engine, last, now):
         if now - last["at"] >= REFILL_GRACE:
             engine.scheduler.request(key, now)
         return False
+    if not judge:
+        resets.set_auto(update={"open": False})
+        diagnostics.log("resets.auto_settled", acct=diagnostics.account_ref(key), refilled=False)
+        return True
     _stop(engine, row, left, now)
     return False
 
@@ -274,17 +280,22 @@ def enabled(prefs):
 
 def tick(engine):
     prefs, resets = engine.prefs, engine.resets
-    if not enabled(prefs):
+    auto = resets.auto()
+    last = auto.get("last") or {}
+    on = enabled(prefs) and not auto.get("stopped")
+    # Nothing is looked at while a job runs or records how it ended: an automatic use under way has written `last`
+    # and not yet its request key, which `_settled` would take for a use cut short.
+    if not (on or last.get("open")) or engine.runner.busy:
         return
     now = engine.clock()
-    auto = resets.auto()
-    if auto.get("stopped"):
+    # How the last one went is settled whatever the settings say now: left open while they are off, it would be
+    # judged, once they are on again, by a reading from long after it.
+    if last.get("open") and not _settled(engine, last, now, judge=on):
         return
-    last = auto.get("last") or {}
-    if last.get("open") and not _settled(engine, last, now):
+    if not on:
         return
     # Auto-switch's own reasons to wait (another AccountDeck, read-only, an interrupted switch, paused checks, an
-    # unknown account in use, a failure about this Mac) and any job that runs: nothing gives way to a limit reset.
+    # unknown account in use, a failure about this Mac): nothing gives way to a limit reset.
     if cli_auto.paused(engine) is not None or resets.any_open_request():
         return
     if last and now - last["at"] < GAP:
