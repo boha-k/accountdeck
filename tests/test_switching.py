@@ -93,6 +93,8 @@ class TerminalSwitchTests(SyntheticTestCase):
         self.assertEqual(self.engine.vault.get(self.alpha_key)["credentials"]["claudeAiOauth"]["refreshToken"],
                          "refresh-alpha")                                             # the outgoing login is kept
         self.assertEqual(recover_transactions(self.engine.vault), [])
+        # The user's choice is kept with the account chosen: auto-switch leaves it alone up to 99% (cli_policy).
+        self.assertEqual(self.engine.store.setting("cli_history")["manual_for"], self.beta_key)
 
     def test_a_target_login_that_cannot_be_renewed_never_reaches_claude_code(self):
         before = self.live_bytes()

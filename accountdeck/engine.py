@@ -231,7 +231,8 @@ class Engine:
         self._shape_lock, self._shape_keys = threading.Lock(), set()
         self._doctor_report, self._doctor_thread, self._doctor_due = None, None, real_monotonic() + DOCTOR_FIRST
         self._started_at = real_monotonic()
-        self._wall, self._last_heartbeat = real_time(), clock()
+        self._wall, self._mono, self._last_heartbeat = real_time(), real_monotonic(), clock()
+        self.woke_at = None                  # the engine's time when the Mac last woke from sleep (`_check_resume`)
         self._previous_state, self._alerts_rev, self._invalid_logged = None, None, False
         self.tray_handle = None              # the menu bar item while it shows (run.py, update_settings)
         self.sense_active()
@@ -720,9 +721,13 @@ class Engine:
         self._wake.set()
 
     def _check_resume(self, now):
-        wall = self.real_time()
+        wall, mono = self.real_time(), self.real_monotonic()
         jumped = wall - self._wall > 3 * self.tick_seconds
-        self._wall = wall
+        # The wall clock ran on while the monotonic one stood still: the Mac slept (a tick that only took long is no
+        # sleep, and usage went on under it). The burn-rate forecast forgets the readings from before (cli_auto).
+        if (wall - self._wall) - (mono - self._mono) > WATCHDOG_GAP:
+            self.woke_at = now
+        self._wall, self._mono = wall, mono
         if jumped:
             self._read_baseline = self.real_monotonic()
             self.scheduler.resume(now)

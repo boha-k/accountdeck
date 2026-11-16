@@ -55,11 +55,14 @@ def _forecast(engine, row, now):
     planned = engine.scheduler.planned(row["id"])
     wait = engine.scheduler.governor.delay(("claude_cli", row["identity"]), now, urgent=True)
     horizon = min(max((planned or now) - now, wait, 0.0) + FORECAST_MARGIN, FORECAST_CAP)
+    # Only readings since the terminals came to this account, and none from before the Mac last slept: a rate from
+    # when it was last in use, or from before a sleep in which nothing was used, says nothing about now.
+    came = cli_policy.number(engine.store.setting("cli_history", {}).get("left_at"))
+    since = max([now - cli_policy.FORECAST_SPAN - 600, *(at for at in (came, engine.woke_at) if at is not None and at <= now)])
     result = {}
     for window in (row["last_good_usage"] or {}).get("windows", []):
         if isinstance(window, dict) and isinstance(window.get("id"), str):
-            value = cli_policy.forecast(engine.store.readings(row["id"], window["id"], since=now - cli_policy.FORECAST_SPAN - 600),
-                                        now, horizon)
+            value = cli_policy.forecast(engine.store.readings(row["id"], window["id"], since=since), now, horizon)
             if value is not None:
                 result[window["id"]] = value
     return result

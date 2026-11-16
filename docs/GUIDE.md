@@ -92,15 +92,17 @@ Accounts with and without a 5-hour limit sit side by side. Since 2026-10-30 veri
 (the former Max 20x) have only weekly limits: the general one and Fable's. Max, Pro and Ultra accounts
 still on Anthropic's temporary limit also have a 5-hour limit. Plans read Ultra, Max or Pro from the
 login's tier. Limits come from Claude's own list of meters, so a new meter holds and moves the terminals
-without a release, unless it belongs to another app or to a model you haven't pinned; codenames Claude
-doesn't list are never shown or counted.
+without a release, unless it belongs to another app or to a model that is neither Fable nor pinned; codenames
+Claude doesn't list are never shown or counted.
 
 ![The dashboard with Max and Ultra accounts side by side (demo mode, synthetic accounts)](images/dashboard-mixed.png)
 
 ### Auto-switch
 
-**Auto-switch** is on at **95 % used**, watching the 5-hour (where the account has one), weekly and
-pinned-model weekly limits ("Fable" also matches "Fable 5.1"). Order: **Soonest reset first**, **Most
+**Auto-switch** is on at **95 % used**, watching the 5-hour (where the account has one), the weekly and the
+Fable weekly limits, and the weekly limit of a model you pinned (a name also matches its versions: "Fable" is
+"Fable 5.1" too). Fable's limit always counts, whatever is pinned: an account that is out of Fable is left, and
+is no target. Order: **Soonest reset first**, **Most
 room left first** or **My own order**; the same accounts always give the same pick. A target needs a reading under 15
 minutes old, 10 points of room below the threshold in every watched window, no limit locked by Claude and,
 once known, a login lasting 12 more hours. Accounts whose reads are paused or failing, or whose automatic
@@ -111,25 +113,37 @@ hourly. While none qualifies, an account whose last read failed is read again (a
 rather than waiting for its next scheduled read.
 
 A passed reset counts as refilled until the next reading. A limit filling fast switches early when its
-burn rate would pass the threshold before the next check. When no account qualifies, every account is
+burn rate would pass the threshold before the next check; the burn rate counts only readings since the
+terminals came to that account and since the Mac last woke. When no account qualifies, every account is
 used up to 99 %: the active one stays until 99 %, then terminals move to an account with at least 2
 points left. An account that is out of a limit, needs sign-in or has under an hour of login left never
 waits: terminals move to the account with the most room by its last reading (up to a day old and at most
-97 % used), even one whose login ends within 12 hours if it has over 2 hours left. A 5-hour refill within
+97 % used), even one whose login ends within 12 hours if it has over 2 hours left. When the account in use
+works for no model at all (its weekly or 5-hour limit is spent, it is on hold or its login is gone) and every
+other account is out of a model's own limit only, the terminals move to the one whose week has the most
+room: other models still work there. An account that is only out of Fable is never left for another one
+that is out of Fable too; when that is all that is low, the alert says "All terminal accounts are low on
+their Fable weekly limit; other models still have room." A 5-hour refill within
 10 minutes and an expired idle terminal token hold only a threshold switch; a Claude outage holds nothing.
 
 Another action in progress holds auto-switch until it finishes, except a Claude Desktop, Codex or
 Antigravity switch still waiting for sessions to close: a switch your terminals need (threshold, limit
 reached or sign-in; never an early switch) cancels it before anything changed and tells you to start it
 again. Alerts say why no account can take over, and the dashboard says why auto-switch is paused. The
-optional early switch spends weekly allowance expiring within 24 hours. **Leave Out of Auto-Switch** in an
-account's **More** (⋯) menu excludes it (**Let Auto-Switch Use It** takes it back); after an automatic
+early switch (**Use weekly allowance before it resets**, on by default) spends weekly allowance expiring
+within 24 hours: only on an account whose week ends more than an hour before that of the account in use,
+and never within 2 hours of another automatic switch or of your own choice. **Leave Out of Auto-Switch** in
+an account's **More** (⋯) menu excludes it (**Let Auto-Switch Use It** takes it back); after an automatic
 switch **Undo** is available for 10 minutes.
+
+Your own choice stands. After **Undo**, or any switch you make in AccountDeck, auto-switch leaves the
+terminals on that account for 2 hours even when it is past your threshold, until a reading or the burn
+rate says 99 %. A limit reached, a lock or a login that ends still moves them at once.
 
 ### Limit errors
 
 AccountDeck also watches Claude Code's transcripts (read-only, every 3 s, only the lines added since).
-When a terminal session writes that it hit its 5-hour, weekly or pinned-model limit, AccountDeck reads
+When a terminal session writes that it hit its 5-hour, weekly, Fable or pinned-model limit, AccountDeck reads
 that account once more and, unless the reading shows room in that limit, moves the terminals within
 seconds, also while its own usage reads fail. An error up to 90 s after an account change belongs to the
 account just left, and an account left at a limit is not switched back to until a reading shows room or
