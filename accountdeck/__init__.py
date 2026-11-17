@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 # Set by hand. install.sh reads this line.
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 
 def _read_build():

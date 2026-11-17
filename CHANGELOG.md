@@ -4,7 +4,7 @@ All notable changes to AccountDeck are listed here, newest first. The format fol
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each version has a heading
 `## [X.Y.Z] - YYYY-MM-DD`; the release notes on GitHub are cut from these headings.
 
-## [Unreleased]
+## [2.3.0] - 2026-11-16
 
 ### Added
 
@@ -246,4 +246,5 @@ Later fixes shipped under the same version number, up to 2026-11-02:
   rollback conflict no longer stops renewals.
 - Other jobs no longer pause terminal auto-switch indefinitely.
 
+[2.3.0]: https://github.com/boha-k/accountdeck/releases/tag/v2.3.0
 [2.2.0]: https://github.com/boha-k/accountdeck/releases/tag/v2.2.0
