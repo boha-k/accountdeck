@@ -1,9 +1,9 @@
 """The terminal auto-switch policy (§7). Pure: no I/O or clock reads.
 
 `evaluate` decides, for the active terminal account, whether to switch now and to which account:
-- threshold: any considered window (5-hour while Claude reports one, weekly, the pinned model's weekly, a meter
-  of a new kind: rules.holds_terminals) at or past `cli_threshold`, or projected to pass it before the next read
-  can land (the burn-rate forecast);
+- threshold: any considered window (5-hour while Claude reports one, weekly, Fable's weekly, the pinned model's
+  weekly, a meter of a new kind: rules.holds_terminals) at or past `cli_threshold`, or projected to pass it before
+  the next read can land (the burn-rate forecast);
 - out / login: a limit reached or locked (`blocked`), a sign-in that needs renewing, or a login that ends within
   LOGIN_ACTIVE (1 hour) switches whatever the threshold;
 - eligible targets have a reading at most 15 minutes old and at least 10 points of room below the
@@ -18,7 +18,9 @@
   FALLBACK_AGE old) is used at once, without the fresh read cli_auto otherwise waits for (`read_first`):
   it beats staying on a dead account, so a login ending within LOGIN_TARGET still
   qualifies while it has LOGIN_FALLBACK (2 hours) left; never a needs-sign-in, left-out, frozen, on-hold,
-  locked or full one;
+  locked or full one. An account in use that works for no model (its 5-hour or weekly limit is spent, it is on
+  hold or its login is gone) is also left for one whose week has room though a model's own limit there is used
+  up (`spare`): other models still work on it. One that is only out of a model's limit is never left for such;
 - once no account qualifies, every account is used up to DRAIN_CEILING (99 %): the active one stays
   until it reaches it, then a target with DRAIN_ROOM points left below it is used. "Every account is
   near or past N %" (under 10 points of room) and "All terminal accounts are low" are said only when that
@@ -29,17 +31,24 @@
 - order (`ordered`): soonest weekly reset, with resets within an hour of their group's earliest counting
   as equal and broken by room; most room, with room within a point of its group's most broken by the
   sooner reset; or the manual order. It sorts by keys, so the same accounts always give the same target;
-- the optional early switch spends weekly allowance that expires within 24 hours, at most every 2
-  hours and never within 2 hours of a manual choice.
+- the user's own choice (a switch in AccountDeck, Undo included) holds against the threshold switch for
+  MANUAL_HOLD (2 hours) while the terminals stay on the account chosen, but only until a reading or the forecast
+  says DRAIN_CEILING: a limit reached or a login that ends still moves them;
+- the early switch (a setting) spends weekly allowance that expires within 24 hours: only for a week that ends
+  over an hour sooner than the active account's (resets within the hour count as equal, and Claude reports one
+  reset a second apart from reading to reading), never within 2 hours of any automatic switch or of a manual
+  choice.
 """
 from collections import Counter
 from datetime import datetime
 import math
 
 from .core import is_frozen
-from .rules import LOCKED_TEXT, holds_terminals, pinned_match
+from .rules import LOCKED_TEXT, holds_terminals, model_names, watched_model
 
 HOUR = 3600
+# How long the user's own choice holds, and how long after any automatic switch an early switch waits.
+MANUAL_HOLD = EARLY_GAP = 2 * HOUR
 LOGIN_TARGET, LOGIN_ACTIVE = 12 * HOUR, HOUR     # a login ending this soon is no target / is left at once
 # The out / login fallback still takes a login ending within LOGIN_TARGET while it has this much left: the
 # terminals then get at least an hour on it before its last hour (LOGIN_ACTIVE) moves them on again.
@@ -51,7 +60,12 @@ FALLBACK_AGE = 24 * HOUR
 
 
 def number(value):
-    return value if type(value) in (int, float) and math.isfinite(value) else None
+    """`value` when it is a finite int or float, else None: a whole number too large for a float (a damaged setting,
+    an absurd server value) is none either, rather than an OverflowError at every check."""
+    try:
+        return value if type(value) in (int, float) and math.isfinite(value) else None
+    except OverflowError:
+        return None
 
 
 def reading_age(account, now):
@@ -72,14 +86,14 @@ def refilled(window, now, read_at):
 def _limit_name(window):
     """How the policy's words name a limit beyond the 5-hour and weekly ones: "Fable weekly", a meter's own label."""
     if window.get("kind") == "model":
-        return (window.get("model") or (window.get("label") or "").removesuffix(" weekly")) + " weekly"
+        return (window.get("model") or model_names(window)[1]) + " weekly"
     return window.get("label") or window.get("id")
 
 
 def considered(account, settings, now=None):
     """[(label, % used or None, window)]: every limit that holds the terminals (rules.holds_terminals): the
-    5-hour and weekly windows, always first, then the pinned model's weekly window and any meter of a new
-    kind. Given `now`, a window whose reset has passed since the reading counts as 0 % used."""
+    5-hour and weekly windows, always first, then Fable's and the pinned model's weekly windows and any meter of
+    a new kind. Given `now`, a window whose reset has passed since the reading counts as 0 % used."""
     windows, pinned = account.get("windows") or {}, settings.get("pinned_model")
     if isinstance(windows, list):
         five = next((w for w in windows if w.get("kind") == "session"), None)
@@ -89,7 +103,7 @@ def considered(account, settings, now=None):
     else:
         five, weekly = windows.get("five_hour"), windows.get("weekly", {})
         more = [(label + " weekly", w) for label, w in windows.get("models", {}).items()
-                if pinned_match((label, (w.get("label") or "").removesuffix(" weekly")), pinned)]
+                if watched_model((label, model_names(w)[1]), pinned)]
     age = None if now is None else reading_age(account, now)
     read_at = None if age is None else now - age
 
@@ -189,6 +203,20 @@ def why_none(rows, threshold):
     return counts["past"] > 0 and set(counts) <= {"past", "left"}, ", ".join(parts) or "no other account is saved"
 
 
+def _models_only(active, others, threshold):
+    """The per-model limits ("Fable weekly") that alone leave the account in use and the `others` (those past the
+    threshold) without room, or None when a limit every model shares is in the way too: "All terminal accounts are
+    low" then says which limit, as the terminals still work for other models."""
+    limiting = [(label, w) for label, used, w in active["values"] if used is not None and used >= threshold]
+    if not limiting:
+        return None
+    for row in others:
+        limiting += [(label, w) for label, used, w in row["values"] if used is not None and used > threshold - 10]
+    if any(w.get("kind") != "model" for _, w in limiting):
+        return None
+    return " and ".join(sorted({label for label, _ in limiting}))
+
+
 # Once every account is near or past the threshold, each is used up to the ceiling rather than idling
 # there: the active account stays until it reaches it, and a target needs this much room below it.
 DRAIN_CEILING, DRAIN_ROOM = 99, 2
@@ -244,16 +272,20 @@ def evaluate(accounts, settings, history, now):
             # Room at its last reading, too old to act on: read it again when it is needed.
             skip, why = f"reading {duration(age)} old", "old"
         room_left = known and all(used <= DRAIN_CEILING - DRAIN_ROOM for _, used, _ in values)
+        # Fit for the out / login fallback by its last good reading alone, however it is read now.
+        fit = ((skip is None or why in ("past", "old", "unread") or (why == "ending" and ends - now > LOGIN_FALLBACK))
+               and age is not None and age <= FALLBACK_AGE)
+        shared = [used for _, used, w in values if w.get("kind") != "model"] if known else []    # not one model's own
         rows.append({"id": account["id"], "label": account["label"], "skip": skip, "room": room,
                      # A refilled weekly window's next reset is unknown until the next reading.
                      "weekly_reset": None if refilled(weekly, now, read_at) else reset(weekly),
                      "account": account, "values": values, "why": why, "reread": reread,
                      # Skipped only for being past the threshold (not health, freshness or choice): drained when all are.
                      "drainable": (skip is None or why == "past") and room_left,
-                     # Fit for the out / login fallback by its last good reading alone, however it is read now.
-                     "usable": (skip is None or why in ("past", "old", "unread")
-                                or (why == "ending" and ends - now > LOGIN_FALLBACK))
-                               and room_left and age is not None and age <= FALLBACK_AGE})
+                     "usable": fit and room_left,
+                     # Its week has room though a model's own limit there may be used up: other models work on it.
+                     "spare": fit and known and all(used <= DRAIN_CEILING - DRAIN_ROOM for used in shared),
+                     "shared": max(shared, default=None)})
     rows = ordered(rows, settings.get("cli_order", "soonest_reset"), settings.get("cli_manual_order", []))
     result = {"action": "none", "target": None, "kind": None, "reason": "", "hold": None, "refresh": [],
               "read_first": True, "exhausted": False, "all_low": False,
@@ -271,12 +303,16 @@ def evaluate(accounts, settings, history, now):
     soon = not over and [(label, used, w) for label, used, w in projected if used is not None and used >= threshold]
     if soon:
         over = soon
+    peak = max((used for _, used, _ in projected if used is not None), default=0)
     on_hold = account.get("health") == "on_hold"        # Claude put it on hold: the terminals cannot use it
     locked = blocked(account, settings)
     out = on_hold or locked or account.get("out") or any(used is not None and used >= 100 for _, used, _ in values)
     ends = number(account.get("login_ends_at"))
     ending = ends is not None and ends - now < LOGIN_ACTIVE
     login = account.get("health") == "needs_signin" or ending
+    # It works for no model: a limit every model shares is spent or locked, Claude put it on hold, or its login is gone.
+    dead = login or on_hold or any((used is not None and used >= 100) or w.get("blocked")
+                                   for _, used, w in values if w.get("kind") != "model")
     trigger = "login" if login else "out" if out else "threshold" if over else None
     if account.get("live_expired") and trigger not in ("out", "login"):
         # Its reading waits for the terminals' next message; a limit reached or a dead login still switches.
@@ -287,6 +323,13 @@ def evaluate(accounts, settings, history, now):
         five_reset = reset(values[0][2])
         if trigger == "threshold" and all(label == "5-hour" for label, _, _ in over) and five_reset is not None and 0 <= five_reset - now <= 600:
             result["hold"] = f"{name} refills in {duration(five_reset - now)} — staying"
+            return result
+        # Undo, or any switch the user made here: it stands against the threshold for a while, but not until the
+        # limit is reached, where a session would stop before anything moved.
+        chose = (history.get("manual_for") == account["id"]
+                 and 0 <= now - (number(history.get("manual_at")) or -1e20) < MANUAL_HOLD)
+        if trigger == "threshold" and chose and peak < DRAIN_CEILING:
+            result["hold"] = f"You chose {name} — using it up to {DRAIN_CEILING}%"
             return result
         if account.get("health") == "needs_signin":
             lead = f"{name} needs sign-in"
@@ -325,13 +368,19 @@ def evaluate(accounts, settings, history, now):
                 return result
             # The most room again, not the user's order: a soon-resetting account can be the fullest.
             drain, result["refresh"] = ordered(usable, "most_room"), refresh
+            spare = [row for row in rows if row["spare"]] if dead and not drain else []
+            if spare:
+                target = min(spare, key=lambda row: (row["shared"], row["label"].casefold(), row["id"]))
+                result.update(action="switch", target=target["id"], kind=kind, read_first=False,
+                              reason=f"{lead}; no account has room in every limit ({summary}), so {target['label']} is "
+                                     f"used: its week has room, though a model's own limit there is used up.")
+                return result
         else:
             result["refresh"] = refresh
             stale = [row for row in rows if row["why"] == "old"]
             if stale:
                 result["hold"] = f"Checking {', '.join(row['label'] for row in stale[:3])} before switching"
                 return result
-            peak = max((used for _, used, _ in projected if used is not None), default=0)
             if peak < DRAIN_CEILING:
                 because = f"Every account is near or past {threshold}%" if all_past else f"No account can take over ({summary})"
                 result["hold"] = f"{because} — using {name} up to {DRAIN_CEILING}%"
@@ -354,26 +403,32 @@ def evaluate(accounts, settings, history, now):
                 resets.append((max(reset(w) for w in limiting), row))
         first_reset, first = min(resets, key=lambda pair: pair[0]) if resets else (None, None)
         tail = f" {first['label']} refills first at {datetime.fromtimestamp(first_reset).strftime('%I:%M %p').lstrip('0')}." if first else ""
-        result.update(exhausted=True, all_low=all_past,
-                      reason=("All terminal accounts are low." if all_past else f"No terminal account can take over: {summary}.") + tail)
+        only = _models_only(active, [row for row in rows if row["why"] == "past"], threshold) if all_past else None
+        said = (f"All terminal accounts are low on their {only} limit; other models still have room." if only
+                else "All terminal accounts are low." if all_past else f"No terminal account can take over: {summary}.")
+        result.update(exhausted=True, all_low=all_past, reason=said + tail)
         return result
     if not settings.get("cli_early_switch", True):
         return result
-    last = history.get("last") or {}
-    early_at = history.get("early_at", last.get("at", -1e20) if last.get("kind") == "early" else -1e20)
-    if now - early_at < 2 * HOUR:
-        result["hold"] = "An early switch happened less than 2 hours ago"
-        return result
-    if now - history.get("manual_at", -1e20) < 2 * HOUR:
-        result["hold"] = "Your manual choice is held for 2 hours"
-        return result
     active_reset = active["weekly_reset"]
+    # A week that ends within the hour of the active account's is no reason to move: the order counts those as equal,
+    # and two accounts with one reset time would trade places each time Claude reports it a second apart.
     early = [row for row in eligible if row["weekly_reset"] is not None and active_reset is not None
-             and 0 < row["weekly_reset"] - now <= 24 * HOUR and row["weekly_reset"] < active_reset
+             and 0 < row["weekly_reset"] - now <= 24 * HOUR and row["weekly_reset"] < active_reset - HOUR
              and row["values"][1][1] <= 80
-             and not (row["id"] == history.get("left") and now - history.get("left_at", -1e20) < 1800)]
-    if early:
-        target = min(early, key=lambda row: (row["weekly_reset"], row["label"].casefold(), row["id"]))
-        result.update(action="switch", target=target["id"], kind="early",
-                      reason=f"Using {target['label']}'s weekly allowance before it resets in {duration(target['weekly_reset'] - now)} ({100 - target['values'][1][1]:g}% left).")
+             and not (row["id"] == history.get("left") and now - (number(history.get("left_at")) or -1e20) < 1800)]
+    if not early:
+        return result
+    # Not right after another automatic switch (a threshold switch's Undo would be gone within seconds), nor
+    # against the user's own choice.
+    last = history.get("last") if isinstance(history.get("last"), dict) else {}
+    if now - max(number(last.get("at")) or -1e20, number(history.get("early_at")) or -1e20) < EARLY_GAP:
+        result["hold"] = "The early switch waits: an automatic switch happened less than 2 hours ago"
+        return result
+    if now - (number(history.get("manual_at")) or -1e20) < MANUAL_HOLD:
+        result["hold"] = "The early switch waits: your manual choice is held for 2 hours"
+        return result
+    target = min(early, key=lambda row: (row["weekly_reset"], row["label"].casefold(), row["id"]))
+    result.update(action="switch", target=target["id"], kind="early",
+                  reason=f"Using {target['label']}'s weekly allowance before it resets in {duration(target['weekly_reset'] - now)} ({100 - target['values'][1][1]:g}% left).")
     return result

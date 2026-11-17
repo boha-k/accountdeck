@@ -23,7 +23,9 @@ AccountDeck runs a small service on your Mac and shows a dashboard and a menu ba
   never shown as zero.
 - **Limit resets.** How many limit resets (OpenAI: banked resets) each Claude and Codex account holds, what
   each refills and when it expires, and **Use a Limit Reset…** for one account after you confirm what will
-  happen. Never automatic.
+  happen. Never automatic unless you turn on **Use a limit reset when every terminal account is out** (off by
+  default): AccountDeck then uses one Claude Code reset, on one account at a time, once every terminal account
+  is at 97 % or more, and tells you each time.
 - **Auto-switch.** When the account in use reaches 95 % of a limit (you can change that), the terminals
   move to the next account with room. When a session hits a limit anyway, they move within seconds.
   Undo is available for 10 minutes.
@@ -232,7 +234,8 @@ keychain as `AccountDeck2 vault`; it opens nothing without the data, and Keychai
   cookie; every change must come from the dashboard's own page; a strict content policy stops it loading
   anything from elsewhere. The dashboard uses no CDN and no web fonts.
 - **Only the providers.** AccountDeck connects to Anthropic's `api.anthropic.com` (usage, account, an
-  account's limit resets, and the one request that uses a limit reset when you confirm it),
+  account's limit resets, and the one request that uses a limit reset when you confirm it, or when you
+  turned on the automatic use and every terminal account is out),
   `platform.claude.com` (renewing a saved Claude login) and `claude.ai` (Claude Desktop's usage when its
   token cannot be used), to the status pages `status.claude.com` and `status.openai.com`, and, before it
   renews a saved Codex login, opens a connection to `auth.openai.com` to see whether the Mac is online.

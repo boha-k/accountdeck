@@ -237,6 +237,8 @@
   text-overflow: ellipsis;
 }
 .limit-note .icon { width: 12px; height: 12px; }
+/* `text-overflow` on the flex box draws no dots: its countdown, the part long enough to be cut, draws its own. */
+.limit-note > time { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .limit-note.is-good { color: var(--green-text); }
 .limit-note.is-out { color: var(--red-text); }
 .limit-note[data-tier="soon"], .limit-note[data-tier="imminent"], .limit-note[data-tier="resetting"] { color: var(--accent-text); font-weight: 500; }

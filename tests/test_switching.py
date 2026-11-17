@@ -12,14 +12,14 @@ from unittest import mock
 
 from tests.helpers import CLAUDE_USAGE, FAST, SyntheticTestCase, new_uuid, terminal_login
 
-from accountdeck import activity, cli_accounts, cli_auto, switch_cli
-from accountdeck.core import DeckError, atomic_write, json_bytes, recover_transactions
+from accountdeck import activity, cli_accounts, cli_auto, switch_claude, switch_cli
+from accountdeck.core import DeckError, FileTransaction, atomic_write, json_bytes, recover_transactions
 from accountdeck.procs import FakeProcessController, unix_time
 from accountdeck.providers import claude_cli
 from accountdeck.providers.claude_cli import ClaudeCLI
 from accountdeck.providers.errors import ProviderError
 from accountdeck.providers.http import register_test_host, request, unregister_test_host
-from accountdeck.switch_cli import perform
+from accountdeck.switch_cli import CLISwitch, perform
 from accountdeck.usage import claude_usage
 
 LOGIN_DAYS = 20          # what the scripted token endpoint says is left of a renewed login
@@ -93,6 +93,12 @@ class TerminalSwitchTests(SyntheticTestCase):
         self.assertEqual(self.engine.vault.get(self.alpha_key)["credentials"]["claudeAiOauth"]["refreshToken"],
                          "refresh-alpha")                                             # the outgoing login is kept
         self.assertEqual(recover_transactions(self.engine.vault), [])
+        # The user's choice is kept with the account chosen: auto-switch leaves it alone up to 99% (cli_policy).
+        self.assertEqual(self.engine.store.setting("cli_history")["manual_for"], self.beta_key)
+        # It ends once auto-switch has moved the terminals on: back on beta by themselves later, they are not held there.
+        self.engine.submit(CLISwitch(self.engine, self.alpha_key, kind="threshold", reason="beta reached 95%"))
+        self.assertTrue(self.engine.runner.wait(10))
+        self.assertNotIn("manual_for", self.engine.store.setting("cli_history"))
 
     def test_a_target_login_that_cannot_be_renewed_never_reaches_claude_code(self):
         before = self.live_bytes()
@@ -321,6 +327,20 @@ class TerminalSwitchTests(SyntheticTestCase):
         self.assertEqual((self.paths.claude_cli_credentials.read_bytes(), self.paths.claude_user_config.read_bytes()),
                          before)
         self.assertEqual(recover_transactions(self.engine.vault), [])
+
+    def test_a_sign_in_caught_half_way_is_never_saved_under_the_account_it_replaces(self):
+        # /login as gamma wrote gamma's token, and `.claude.json` still names alpha when a switch runs.
+        gamma = new_uuid()
+        self.terminal.owners["refresh-gamma"] = gamma
+        atomic_write(self.paths.claude_cli_credentials,
+                     json_bytes(terminal_login(gamma, "gamma@example.test", token="gamma")[0]))
+        before = self.live_bytes()
+        with self.assertRaises(DeckError) as refused:
+            perform(self.engine.cli, self.beta_key)
+        self.assertEqual(refused.exception.code, "identity")
+        self.assertEqual(self.live_bytes(), before)             # gamma's sign-in stays where it is
+        self.assertEqual(self.engine.vault.get(self.alpha_key)["credentials"]["claudeAiOauth"]["refreshToken"],
+                         "refresh-alpha")                       # and alpha keeps its own login
 
     def test_rollback_keeps_a_login_claude_code_wrote_after_the_switch(self):
         real = self.engine.cli.adapter.current
@@ -627,6 +647,11 @@ class TerminalSwitchTests(SyntheticTestCase):
         self.sign_in_again(terminal_login(self.alpha, "", now=time.time() + 600, token="alpha-again")[0])
         self.engine.sense_active()
         self.assertEqual(self.engine.cli.repair_wanted, (self.alpha_key, "lost"))
+        # Claude Code holds no login now, but alpha is still the account in use, the one this sign-in goes to.
+        self.engine.action("remove", {"id": self.alpha_key})
+        self.assertTrue(self.engine.runner.wait(10))
+        self.assertEqual(self.engine.runner.report()["error"]["code"], "invalid")
+        self.assertEqual(self.engine.vault.get(self.alpha_key)["credentials"]["claudeAiOauth"]["refreshToken"], "refresh-alpha-again")
 
         class Stopped(BaseException):
             pass
@@ -728,6 +753,65 @@ class DesktopSwitchTests(SyntheticTestCase):
         beta_key = engine.store.find("claude", beta["identity"])["id"]               # saved before switching away
         self.assertTrue(engine.store.account(beta_key)["flags"]["restorable"])
         self.assertEqual(engine.vault.get(beta_key)["identity"], beta["identity"])
+        self.assertEqual(recover_transactions(engine.vault), [])
+
+    def desktop(self):
+        """An engine with two saved Claude Desktop accounts, Claude closed and signed in to beta: (engine, alpha's
+        id, alpha, beta), and a function that runs a job and returns its report."""
+        alpha = self.fake_home()["claude"]
+        procs = FakeProcessController(self.paths, timings=FAST, relaunch_identity=alpha["identity"])
+        engine = self.make_engine(procs=procs)
+        alpha_key = engine.accounts.capture("claude", claude_running=False)
+        beta = self.fake_home()["claude"]
+        engine.sense_active()
+
+        def run(action, **body):
+            plan = engine.action("switch-plan", {"provider": "claude", "purpose": action, **body})["plan"]
+            engine.action(action, {"provider": "claude", **body, "plan_id": plan["plan_id"], "consent": "now"})
+            self.assertTrue(engine.runner.wait(20))
+            return engine.runner.report()
+        return engine, alpha_key, alpha, beta, run
+
+    def signed_in(self):
+        return json.loads((self.paths.claude_profile / "config.json").read_bytes())["lastKnownAccountUuid"]
+
+    def test_a_desktop_switch_never_writes_under_a_claude_opened_meanwhile(self):
+        engine, alpha_key, alpha, beta, run = self.desktop()
+        save_current = switch_claude.ClaudeJob._save_current
+
+        def then_claude_opens(job, *args, **kwargs):
+            found = save_current(job, *args, **kwargs)
+            engine.procs.add_claude_desktop()                  # the user opens Claude while its sign-in is saved
+            return found
+        with mock.patch.object(switch_claude.ClaudeJob, "_save_current", autospec=True, side_effect=then_claude_opens):
+            report = run("switch", id=alpha_key)
+        self.assertEqual((report["outcome"], report["error"]["message"]), ("failed", switch_claude.STARTED_AGAIN))
+        self.assertEqual(self.signed_in(), beta["identity"])
+        self.assertEqual(recover_transactions(engine.vault), [])
+
+    def test_a_recover_cut_short_never_puts_the_switch_target_back(self):
+        engine, alpha_key, alpha, beta, run = self.desktop()
+        self.assertEqual(run("switch", id=alpha_key)["outcome"], "success")
+        switch_key = next(p.name.removesuffix(".dpapi") for p in engine.vault.root.glob("transaction-*.dpapi"))
+        tx = FileTransaction.load(engine.vault, engine.roots(), switch_key)
+        tx.doc["status"] = "verifying"                         # the switch is to be undone (claude_verify)
+        tx.save()
+        engine.recovery = recover_transactions(engine.vault)
+        commit = FileTransaction.commit
+
+        def dies_before_closing(record):                       # Recover wrote beta back, then the app died
+            if record.doc.get("purpose") == "recover":
+                raise RuntimeError("the app died here")
+            return commit(record)
+        with mock.patch.object(FileTransaction, "commit", autospec=True, side_effect=dies_before_closing):
+            self.assertEqual(run("recover")["outcome"], "failed")
+        # The next Recover meets the switch's record first, then its own unfinished one.
+        scan = engine._scan_recovery
+        with mock.patch.object(engine, "_scan_recovery", side_effect=lambda: sorted(scan(), key=lambda k: k != switch_key)):
+            engine.recovery = engine._scan_recovery()
+            self.assertEqual((len(engine.recovery), engine.recovery[0]), (2, switch_key))
+            self.assertEqual(run("recover")["outcome"], "success")
+        self.assertEqual(self.signed_in(), beta["identity"])
         self.assertEqual(recover_transactions(engine.vault), [])
 
     def test_a_job_that_has_left_its_wait_is_never_cancelled_for_a_terminal_switch(self):

@@ -4,19 +4,21 @@ row unchanged; Claude's separate read stays within its limits; and no provider i
 the state, the log, the history or an error."""
 import copy
 import json
+import threading
 import time
 
 from tests.helpers import SyntheticTestCase, new_uuid, terminal_login
 
-from accountdeck import diagnostics
+from accountdeck import cli_auto, diagnostics, reset_auto
 from accountdeck.core import DeckError
+from accountdeck.operations import Operation
 from accountdeck.providers.base import (CLAUDE_CODE_VERSION, OAUTH_PROFILE_URL, OAUTH_USAGE_URL, RESETS_QUERY,
                                         USER_AGENT)
 from accountdeck.providers.errors import ProviderError
 from accountdeck.providers.fake import FakeCodex, ResetLedger
 from accountdeck.providers.http import request_headers
 from accountdeck.resets import MEMORY
-from accountdeck.usage import claude_reset_block
+from accountdeck.usage import claude_reset_block, claude_usage
 
 FAR = "2099-01-01T00:00:00+00:00"
 # A Codex reading with a covered limit below 80% left, so its reset can be used.
@@ -461,3 +463,303 @@ class LimitResetTests(SyntheticTestCase):
         for secret in secrets:
             self.assertEqual([index for index, text in enumerate(texts) if secret in text], [],
                              "a reset id, request key, organisation or token leaked")
+
+
+FABLE = "seven_day_overage_included"       # Claude's name of Fable's weekly limit in a grant's `clears`
+DAY = 86400.0
+
+
+def _in(days):
+    return time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() + days * DAY))
+
+
+def weekly_grant(gid, days=30, **fields):
+    """A weekly reset as Claude gives it today: it refills the week and Fable's limit."""
+    return grant(gid, clears=["seven_day", FABLE], ends_at=_in(days), **fields)
+
+
+def fable_grant(gid, days=30, **fields):
+    return grant(gid, clears=[FABLE], gives_back_weekly=True, ends_at=_in(days), **fields)
+
+
+class _OtherJob(Operation):
+    """Any other job, running until `go` is set."""
+
+    def __init__(self):
+        super().__init__("capture")
+        self.go = threading.Event()
+
+    def run(self):
+        self.go.wait(10)
+
+
+class AutomaticResetTests(SyntheticTestCase):
+    """Automatic limit resets (accountdeck/reset_auto.py, the setting `auto_reset`): a reset is spent by itself only
+    with the setting on and every terminal account out, on the right account and with the reset that fits, one at a
+    time, and never again after one that did not refill."""
+
+    def setUp(self):
+        super().setUp()
+        self.clock = [time.time()]
+        self.ledger, self.owners, self.levels, self.ids, self.stuck = ResetLedger(), {}, {}, {}, False
+        self.ends = {}                       # identity -> when its limits reset by themselves (FAR unless set)
+        identity = new_uuid()
+        self.sign_in_terminal(*self.login("alpha", identity))
+        self.engine = self.start()           # saves the login in use by itself
+        self.alpha = self.engine.store.find("claude_cli", identity)["id"]
+        self.ids[self.alpha] = identity
+
+    def start(self):
+        engine = self.make_engine(owners=self.owners, clock=lambda: self.clock[0])
+        self.terminal.ledger, self.terminal.usage = self.ledger, self.usage
+        return engine
+
+    def login(self, label, identity):
+        credentials, account = terminal_login(identity, f"{label}@example.test", now=self.clock[0], token=label)
+        credentials["claudeAiOauth"]["expiresAt"] = int((self.clock[0] + 3 * DAY) * 1000)
+        self.owners[f"refresh-{label}"] = identity
+        self.ledger.claude[identity], self.levels[identity] = cedar(), [30.0, None]
+        return credentials, account
+
+    def add(self, label):
+        identity = new_uuid()
+        key = self.save_terminal(self.engine, *self.login(label, identity))
+        self.ids[key] = identity
+        return key
+
+    def have(self, key, weekly, fable=None, grants=None):
+        """What Claude answers for this account from now on: its weekly and Fable percentages, and its resets."""
+        self.levels[self.ids[key]] = [float(weekly), fable]
+        if grants is not None:
+            self.ledger.claude[self.ids[key]] = cedar(*grants)
+
+    def usage(self, credentials):
+        identity = self.terminal._owner(credentials)
+        level = self.levels[identity]
+        cleared = self.ledger.cleared.pop(identity, ())
+        if not self.stuck:                   # a reset that worked: the limits it refills read as unused
+            level[0] = 0.0 if "seven_day" in cleared else level[0]
+            level[1] = 0.0 if FABLE in cleared and level[1] is not None else level[1]
+        ends = self.ends.get(identity, FAR)
+        limits = [meter for meter in (
+            {"kind": "weekly_all", "percent": level[0], "resets_at": ends},
+            {"kind": "weekly_scoped", "percent": level[1], "resets_at": ends, "scope": {"model": {"display_name": "Fable"}}})
+            if meter["percent"] is not None]
+        return claude_usage({"five_hour": None, "seven_day": {"utilization": level[0], "resets_at": ends}, "limits": limits},
+                            now=self.clock[0])
+
+    def read(self, *keys, after=0):
+        self.clock[0] += after
+        for key in keys or self.ids:
+            self.assertEqual(self.engine._refresh(key), "ok")
+
+    def finish(self):
+        op = self.engine.runner.current
+        if op is not None:
+            self.assertTrue(op.wait(10))
+        for _ in range(400):                 # `_finished` records the outcome just after the operation ends
+            if not self.engine.runner.busy:
+                break
+            time.sleep(0.005)
+        return [target for _who, target, _key in self.ledger.uses]
+
+    def look(self):
+        """One look of the automatic reset at the accounts, and the job it started to its end: the resets used so far."""
+        reset_auto.tick(self.engine)
+        return self.finish()
+
+    def test_the_account_in_use_with_room_holds_off_a_reset_whatever_its_sign_in(self):
+        now = self.clock[0]
+
+        def row(key, active, weekly, **fields):
+            usage = claude_usage({"five_hour": None, "seven_day": {"utilization": weekly, "resets_at": FAR}}, now=now)
+            return {"id": key, "active": active, "health": "ok", "windows": usage["windows"], "reading_age": 60,
+                    "login_ends_at": None, **fields}
+
+        settings, others = {"cli_threshold": 95, "pinned_model": ""}, [row("b", False, 99), row("c", False, 98)]
+        self.assertTrue(reset_auto.due([row("a", True, 99)] + others, settings, now)["due"])
+        # A reset does not mend a sign-in: room on the account in use means not every limit is out.
+        for active in (row("a", True, 50, login_ends_at=now + 600), row("a", True, 50, health="reauth_required")):
+            self.assertEqual(reset_auto.due([active] + others, settings, now)["why"], "room")
+
+    def test_a_reset_is_used_by_itself_only_with_the_setting_on_and_every_pool_account_out(self):
+        engine = self.engine
+        beta, spare, signin = self.add("beta"), self.add("spare"), self.add("signin")
+        self.have(self.alpha, 98, grants=[weekly_grant("a_weekly")])
+        self.have(beta, 99, grants=[weekly_grant("b_weekly", days=2)])
+        self.have(spare, 10)                 # left out of auto-switch by the user: its room is not the terminals'
+        engine.store.update(spare, flags={**engine.store.account(spare)["flags"], "excluded": True})
+        self.have(signin, 10)                # nor that of an account that needs a new sign-in
+        self.read()
+        engine.store.update(signin, flags={**engine.store.account(signin)["flags"], "health": "needs_signin"})
+        self.assertEqual(self.look(), [])    # off, as it is unless the user turns it on
+        engine.update_settings({"auto_reset": True})
+        # One account with room, or one whose reading cannot say, and nothing is used.
+        self.have(beta, 96)
+        self.read(beta)
+        self.assertEqual(self.look(), [])
+        self.have(beta, 97)
+        self.read(beta)
+        self.read(self.alpha, after=901)     # beta's reading is now too old to count
+        self.assertEqual(self.look(), [])
+        self.read(beta)
+        # Every account auto-switch could use is at 97% or more: one reset, on the account in use, though beta's
+        # expires sooner.
+        self.assertEqual(self.look(), ["a_weekly"])
+        report = engine.runner.snapshot()["report"]
+        self.assertEqual((report["kind"], report["outcome"]), ("use-reset", "success"))
+        said = (f"AccountDeck used one Weekly reset on {engine.store.account(self.alpha)['label']} by itself: every "
+                "terminal account was at 97% or more.")
+        self.assertEqual(engine.store.events(1)[0]["message"], said)
+        alert = engine.store.alerts()[0]
+        self.assertEqual((alert["kind"], alert["level"], alert["account"], alert["message"]),
+                         ("reset_confirmed", "good", self.alpha, said))
+        self.assertEqual(engine.snapshot()["providers"]["claude_cli"]["auto_reset"]["last"]["account"], self.alpha)
+        # Auto-switch waits for the reading that shows the room, and that reading settles the reset.
+        self.assertIn("after its limit reset", cli_auto.paused(engine))
+        self.read(self.alpha, after=5)
+        self.assertIsNone(cli_auto.paused(engine))
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.assertFalse(engine.resets.auto()["last"]["open"])
+        # Out again within the hour: the next reset waits for the hour to pass.
+        self.have(self.alpha, 99, grants=[weekly_grant("a_second")])
+        self.read(self.alpha, beta, after=1800)
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.read(self.alpha, beta, after=1900)
+        self.assertEqual(self.look(), ["a_weekly", "a_second"])
+
+    def test_nothing_is_used_on_numbers_a_reset_changed_or_that_change_by_themselves(self):
+        engine = self.engine
+        beta = self.add("beta")
+        self.have(self.alpha, 99, grants=[weekly_grant("a_weekly")])
+        self.have(beta, 98, grants=[weekly_grant("b_weekly")])
+        self.read()
+        # The user's own reset on alpha, and the setting turned on before alpha is read again: its reading is from
+        # before that reset and says nothing now. Without this, beta's reset went too.
+        plan = engine.action("reset-plan", {"id": self.alpha})["plan"]
+        engine.action("use-reset", {"id": self.alpha, "plan_id": plan["plan_id"], "choice": plan["default"]})
+        self.assertEqual(self.finish(), ["a_weekly"])
+        self.clock[0] += 30
+        engine.update_settings({"auto_reset": True})
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.stuck = True                    # nor does a reading right after it that still says 99%: it may lag
+        self.read(self.alpha, after=5)
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.stuck = False
+        # A switch point of 99: auto-switch moves the terminals to no account above 97%, so beta at 98% has no room
+        # for them, and the account in use counts from the user's own switch point.
+        engine.update_settings({"cli_threshold": 99})
+        self.have(self.alpha, 98)
+        self.read(after=601)
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.have(self.alpha, 100)
+        self.read(self.alpha, after=1)
+        self.assertEqual(self.look(), ["a_weekly", "b_weekly"])
+        self.read(beta, after=5)
+        self.assertEqual(self.look(), ["a_weekly", "b_weekly"])
+        self.assertFalse(engine.resets.auto()["last"]["open"])
+        # Out again an hour later, and beta's week ends by itself in five minutes: that is waited for.
+        self.have(beta, 99, grants=[weekly_grant("b_second")])
+        self.ends[self.ids[beta]] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(self.clock[0] + 3700 + 300))
+        self.read(after=3700)
+        self.assertEqual(self.look(), ["a_weekly", "b_weekly"])
+        # Not soon any more, but Anthropic now says that reset refills Fable's limit only: the last look, which asks
+        # again what it refills, uses nothing.
+        del self.ends[self.ids[beta]]
+        self.read(after=1)
+        self.ledger.claude[self.ids[beta]]["grants"][0]["clears"] = [FABLE]
+        self.assertEqual(self.look(), ["a_weekly", "b_weekly"])
+        self.assertEqual(engine.resets.auto()["failed"]["account"], beta)      # it tried, and stopped at the last look
+
+    def test_the_reset_that_fits_is_used_fable_for_fable_and_another_accounts_when_the_one_in_use_has_none(self):
+        engine = self.engine
+        engine.update_settings({"auto_reset": True})
+        beta, gamma = self.add("beta"), self.add("gamma")
+        # Only Fable's limit is out everywhere: the Fable reset is used, not the weekly one that expires sooner.
+        self.have(self.alpha, 60, 99, grants=[weekly_grant("a_weekly", days=1), fable_grant("a_fable", left=2)])
+        self.have(beta, 50, 98, grants=[weekly_grant("b_weekly", days=20)])
+        self.have(gamma, 40, 100, grants=[weekly_grant("c_weekly", days=5)])
+        self.read()
+        self.assertEqual(self.look(), ["a_fable"])
+        self.read(self.alpha, after=5)
+        self.assertEqual(self.levels[self.ids[self.alpha]], [60.0, 0.0])
+        # The week of the account in use is out, and all it holds is a Fable reset, which does not refill a week:
+        # another account's weekly reset is used, the one that expires first, and auto-switch moves the terminals there.
+        self.have(self.alpha, 98, 20, grants=[fable_grant("a_fable")])
+        self.have(beta, 99, 20)
+        self.have(gamma, 97, 20)
+        self.read(after=3700)
+        self.assertEqual(self.look(), ["a_fable", "c_weekly"])
+        self.read(gamma, after=5)
+        moved = cli_auto.decision(engine)
+        self.assertEqual((moved["action"], moved["target"], moved["kind"]), ("switch", gamma, "threshold"))
+
+    def test_never_a_second_reset_while_a_job_runs_or_an_outcome_is_not_known(self):
+        engine = self.engine
+        engine.update_settings({"auto_reset": True})
+        beta = self.add("beta")
+        self.have(self.alpha, 98, grants=[weekly_grant("a_weekly", left=3)])
+        self.have(beta, 99, grants=[weekly_grant("b_weekly")])
+        self.read()
+        job = _OtherJob()
+        engine.submit(job)                   # any other job: it is never made to give way
+        reset_auto.tick(engine)
+        self.assertEqual(self.ledger.uses, [])
+        job.go.set()
+        self.finish()
+        # A use the user started on another account, its outcome not known: nothing is used by itself meanwhile.
+        self.ledger.scripts[self.ids[beta]] = ["lost"]
+        plan = engine.action("reset-plan", {"id": beta})["plan"]
+        engine.action("use-reset", {"id": beta, "plan_id": plan["plan_id"], "choice": plan["default"]})
+        self.assertEqual(self.finish(), ["b_weekly"])
+        self.assertEqual(self.look(), ["b_weekly"])
+        self.read(after=601)                 # the key's time is over and beta's reset is still there: it was not used
+        # The automatic request itself goes out and no answer comes back: nothing more is sent, on any account,
+        # however long it takes, until a reading says what became of it.
+        self.ledger.scripts[self.ids[self.alpha]] = ["lost"]
+        self.assertEqual(self.look(), ["b_weekly", "a_weekly"])
+        self.assertTrue(engine.resets.auto()["last"]["unsure"])
+        for wait in (200, 200, 200, 3601):
+            self.read(beta, after=wait)
+            self.assertEqual(self.look(), ["b_weekly", "a_weekly"])
+        self.read(self.alpha)                # its reset is still there after the key's time: it was not used
+        self.assertNotIn("last", engine.resets.auto())
+        self.assertEqual(self.look(), ["b_weekly", "a_weekly"])      # and the next try waits its ten minutes
+        self.read(after=601)
+        self.assertEqual(self.look(), ["b_weekly", "a_weekly", "a_weekly"])
+        self.assertEqual(len({key for _who, _target, key in self.ledger.uses}), 3)
+        self.assertEqual(self.ledger.claude[self.ids[self.alpha]]["grants"][0]["resets_left"], 2)
+
+    def test_a_reset_that_did_not_refill_stops_automatic_resets_until_the_user_turns_them_on_again(self):
+        engine = self.engine
+        beta = self.add("beta")
+        self.have(self.alpha, 98, grants=[weekly_grant("a_weekly", left=3)])
+        self.have(beta, 99, grants=[weekly_grant("b_weekly")])
+        self.read()
+        self.stuck = True                    # Claude takes the reset and the limit stays where it was
+        engine.tick()                        # a whole tick, the setting off: nothing
+        self.assertEqual(self.finish(), [])
+        engine.update_settings({"auto_reset": True})
+        engine.tick()
+        self.assertEqual(self.finish(), ["a_weekly"])
+        self.read(self.alpha, after=5)       # a reading right after may lag: nothing is decided, and nothing more used
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.assertNotIn("stopped", engine.resets.auto())
+        self.read(after=601)
+        self.assertEqual(self.look(), ["a_weekly"])
+        self.assertIn("stopped", engine.resets.auto())
+        alert = engine.store.alerts()[0]
+        self.assertEqual((alert["kind"], alert["title"]), ("limit_reached", "Automatic limit resets stopped"))
+        self.assertIsNotNone(engine.snapshot()["providers"]["claude_cli"]["auto_reset"]["stopped"])
+        for _ in range(2):                   # for good: hours later, with every account still out
+            self.read(after=3601)
+            self.assertEqual(self.look(), ["a_weekly"])
+        engine.stop()                        # and after a restart
+        self.engine = engine = self.start()
+        self.read()
+        self.assertEqual(self.look(), ["a_weekly"])
+        # Off and on again is the user's word to go on.
+        engine.update_settings({"auto_reset": False})
+        engine.update_settings({"auto_reset": True})
+        self.stuck = False
+        self.assertEqual(self.look(), ["a_weekly", "a_weekly"])

@@ -165,8 +165,16 @@ class ResetLedger:
                 payload[key] = {**payload[key], "utilization": 0.0}
         kinds = {"session"} if "five_hour" in cleared else set()
         kinds |= {"weekly_all"} if "seven_day" in cleared else set()
+        fable = "seven_day_overage_included" in cleared          # Claude's name of Fable's weekly limit
+        if fable and isinstance(payload.get("seven_day_fable"), dict):
+            payload["seven_day_fable"] = {**payload["seven_day_fable"], "utilization": 0.0}
         for row in payload.get("limits") or ():
-            if isinstance(row, dict) and row.get("kind") in kinds:
+            if not isinstance(row, dict):
+                continue
+            model = (row.get("scope") or {}).get("model") if isinstance(row.get("scope"), dict) else None
+            name = model.get("display_name") if isinstance(model, dict) else model
+            if row.get("kind") in kinds or (fable and row.get("kind") == "weekly_scoped"
+                                            and isinstance(name, str) and name.startswith("Fable")):
                 row["percent"] = 0.0
         return payload
 

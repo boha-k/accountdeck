@@ -15,6 +15,8 @@ from ..core import DeckError
 from .base import OAUTH_HOST
 
 RATE_LIMIT_MARGIN = 900       # added to every Retry-After, so "Retry-After: 0" (or none) waits 15 min
+RETRY_AFTER_CAP = 3600        # a longer Retry-After counts as this: one answer never pauses an account for long,
+                              # and asking again after it costs one request
 BLOCKED_RETRY = 1800
 ESCALATION_COUNT = 3
 ESCALATION_SPAN = 1800
@@ -175,8 +177,8 @@ def retry_after_seconds(value, now=None):
     if value is None:
         return None
     value = str(value).strip()
-    if value.isdigit():
-        return float(int(value))
+    if value.isascii() and value.isdigit():
+        return float(int(value)) if len(value) <= 18 else 1e18      # no float or int() limit is reached
     try:
         when = email.utils.parsedate_to_datetime(value)
     except (TypeError, ValueError, IndexError):
@@ -187,8 +189,8 @@ def retry_after_seconds(value, now=None):
 
 
 def rate_limit_wait(retry_after):
-    """The pause after a 429 (A1): the requested seconds plus a 15-minute margin."""
-    return (retry_after or 0) + RATE_LIMIT_MARGIN
+    """The pause after a 429 (A1): the requested seconds, at most RETRY_AFTER_CAP, plus a 15-minute margin."""
+    return min(retry_after or 0, RETRY_AFTER_CAP) + RATE_LIMIT_MARGIN
 
 
 Outcome = namedtuple("Outcome", "at kind route incident")

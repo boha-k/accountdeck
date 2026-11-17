@@ -128,8 +128,9 @@ class RefreshScheduler:
     """`run(account_id)` reads one account and returns the outcome: "ok", "rate_limited",
     "outage" or any other failure kind (it must not raise)."""
 
-    def __init__(self, run, *, workers=WORKERS, rng=random.random, governor=None, inline=False):
+    def __init__(self, run, *, workers=WORKERS, rng=random.random, governor=None, inline=False, done=None):
         self.run = run
+        self.done = done             # called once a read has ended and its plan says so (no longer `running`)
         self.rng = rng
         self.governor = governor or RequestGovernor()
         self.inline = inline
@@ -173,6 +174,9 @@ class RefreshScheduler:
             known = {t.id for t in targets}
             for key in [key for key in self._plans if key not in known]:
                 del self._plans[key]
+            # One Codex read at a time (`_read`): another would only hold a worker waiting for it, and with three
+            # waiting no read could start, the terminals' account in use included. It stays due for a later tick.
+            codex = any(t.provider == "codex" and t.id in self._plans and self._plans[t.id].running for t in targets)
             for target in targets:
                 if target.provider == "claude_cli" and not target.active and sum(
                         t.provider == "claude_cli" and not t.active for t in ready) >= 2:
@@ -202,6 +206,10 @@ class RefreshScheduler:
                         plan.signal = False
                         continue
                     picked.add(gkey)
+                if target.provider == "codex":
+                    if codex:
+                        continue
+                    codex = True
                 ready.append(target)
         return ready
 
@@ -257,6 +265,8 @@ class RefreshScheduler:
                                       acct=diagnostics.account_ref(target.id))
         finally:
             self.completed(target, outcome, clock())
+            if self.done is not None:
+                self.done()
 
     def completed(self, target: Target, outcome: str, now: float) -> None:
         with self._lock:

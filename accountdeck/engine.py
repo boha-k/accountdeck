@@ -27,8 +27,8 @@ import threading
 import time
 import tomllib
 
-from . import (__version__, activity, alerts, cli_auto, contract, diagnostics, intel, move_import, switch_claude,
-               switch_cli, switching, updates)
+from . import (__version__, activity, alerts, cli_auto, contract, diagnostics, intel, move_import, reset_auto,
+               switch_claude, switch_cli, switching, updates)
 from . import BUILD, doctor
 from .accounts import AccountService, default_label, restorable
 from .agy_accounts import AgyService
@@ -48,6 +48,7 @@ from .providers import make_providers
 from .providers.antigravity import Antigravity
 from .providers.claude_cli import ClaudeCLI, expires
 from .providers.codex import Codex
+from .providers.errors import RATE_LIMIT_MARGIN, RETRY_AFTER_CAP
 from .providers.status import ObservedStatus, StatuspageStatus, StatuspageSummary
 from . import runway
 from .rules import REFILL_KEEP
@@ -199,7 +200,8 @@ class Engine:
         self.identity_known = {name: False for name in self.providers}
         self.background_verifiers = []
         self.closers = []                    # called once by stop(), e.g. a Codex sign-in helper
-        self.scheduler = RefreshScheduler(self._read_tracked, inline=inline)
+        # The page hears of a read's end too: the state built at the read's own bump still shows it running.
+        self.scheduler = RefreshScheduler(self._read_tracked, inline=inline, done=self.bump)
         self.accounts = AccountService(self.store, self.vault, self.providers, self.prefs, clock=clock,
                                        observed=self.observed, levels=self.levels,
                                        lock_for=self.scheduler.account_lock,
@@ -216,7 +218,9 @@ class Engine:
             self.cli.adopt_stashes()
             self.cli.restore_enrollment()
         if self.owns_login:
+            self.store.cap_pauses(RETRY_AFTER_CAP + RATE_LIMIT_MARGIN)
             self.accounts.settle_renewals()
+            self.accounts.rescue_sign_ins()
             try:
                 self.agy.recover_at_start()
             except Exception as exc:     # Claude's and Codex's accounts must still start
@@ -231,7 +235,8 @@ class Engine:
         self._shape_lock, self._shape_keys = threading.Lock(), set()
         self._doctor_report, self._doctor_thread, self._doctor_due = None, None, real_monotonic() + DOCTOR_FIRST
         self._started_at = real_monotonic()
-        self._wall, self._last_heartbeat = real_time(), clock()
+        self._wall, self._mono, self._last_heartbeat = real_time(), real_monotonic(), clock()
+        self.woke_at = None                  # the engine's time when the Mac last woke from sleep (`_check_resume`)
         self._previous_state, self._alerts_rev, self._invalid_logged = None, None, False
         self.tray_handle = None              # the menu bar item while it shows (run.py, update_settings)
         self.sense_active()
@@ -536,6 +541,7 @@ class Engine:
             return result
         finally:
             self._record_read(provider, result)
+            self.bump()                      # the page sees the new reading now, not after Claude's resets read
             self.resets.after_read(key, provider, result)      # Claude's resets read when due; it never raises
             self._watch_shape(provider, key, row)
             self._read_once.add(key)
@@ -617,6 +623,9 @@ class Engine:
         phase("runway", self._refresh_runway, now)
         phase("doctor", self._doctor_tick)
         phase("verifiers", self._tick_verifiers, now)
+        # Before auto-switch: with every terminal account out, a limit reset comes first (the setting `auto_reset`),
+        # and auto-switch then waits for the reading that shows the room.
+        phase("autoreset", reset_auto.tick, self)
         phase("autoswitch", cli_auto.tick, self)
         phase("tidy", self._tidy, now)
         phase("convert", self._convert_deferred, now)
@@ -720,9 +729,13 @@ class Engine:
         self._wake.set()
 
     def _check_resume(self, now):
-        wall = self.real_time()
+        wall, mono = self.real_time(), self.real_monotonic()
         jumped = wall - self._wall > 3 * self.tick_seconds
-        self._wall = wall
+        # The wall clock ran on while the monotonic one stood still: the Mac slept (a tick that only took long is no
+        # sleep, and usage went on under it). The burn-rate forecast forgets the readings from before (cli_auto).
+        if (wall - self._wall) - (mono - self._mono) > WATCHDOG_GAP:
+            self.woke_at = now
+        self._wall, self._mono = wall, mono
         if jumped:
             self._read_baseline = self.real_monotonic()
             self.scheduler.resume(now)
@@ -914,14 +927,17 @@ class Engine:
         now = self.clock()
         settings = self.prefs.public()
         machine, slow = self._observe(), self._refresh_slow(now)
-        rows = self.store.accounts()
+        # One look at the accounts and at who is signed in for the whole state: a switch or a Remove that ends on
+        # `ad2-ops` meanwhile would otherwise give it two accounts in use, or none, or an auto-switch order that
+        # misses an account. The next state shows the change.
+        rows, identities = self.store.accounts(), dict(self.active_identity)
         self._counts = self._count_accounts(rows)
         status = {name: self.status(name, now) for name in self.providers}
         refills = {}
         for refill in self.store.refills(now - REFILL_KEEP):
             refills.setdefault(refill["account"], {})[refill["window"]] = {
                 "at": refill["reset_at"], "confirmed": refill["confirmed_at"], "from": refill["previous_used"]}
-        accounts = [self._raw_account(row, now, status, refills.get(row["id"], {})) for row in rows]
+        accounts = [self._raw_account(row, now, status, refills.get(row["id"], {}), identities) for row in rows]
         accounts += self._unsaved_rows(now, status)
         runner = self.runner.snapshot()
         pending = runner["pending"]
@@ -938,9 +954,11 @@ class Engine:
                 "switching": bool(pending and pending["provider"] == name and pending["phase"] not in TERMINAL_PHASES),
                 "paused": bool(self.prefs.get("refresh_paused")) or self.scheduler.provider_pause.get(name, False)}
         providers["claude"].update(data_folder=slow["data_folder"], folder_warning=None)
-        providers["claude_cli"].update(autoswitch=cli_auto.state(self), enrollment=copy.deepcopy(self.cli.phase),
+        providers["claude_cli"].update(autoswitch=cli_auto.state(self, rows, identities),
+                                        enrollment=copy.deepcopy(self.cli.phase),
                                         readonly_reason=self.cli.adapter.readonly_reason,
                                         usage_shape=shape_change(self.store.setting("usage_shapes"), "claude_cli", now))
+        providers["claude_cli"]["auto_reset"] = reset_auto.state(self)
         providers["claude_cli"]["runway"] = self._runway
         providers["claude_cli"]["watch"] = self.watch.state(now)
         providers["claude_cli"]["signin_due"] = alerts.signin_due(accounts, now)
@@ -1028,9 +1046,9 @@ class Engine:
                 "paused": bool(self.prefs.get("refresh_paused")) or self.scheduler.provider_pause.get("antigravity", False),
                 **block}
 
-    def _raw_account(self, row, now, status, refills):
+    def _raw_account(self, row, now, status, refills, identities):
         name, key, flags = row["provider"], row["id"], row["flags"]
-        active = row["identity"] == self.active_identity.get(name)
+        active = row["identity"] == identities.get(name)
         error = None
         if row["error"]:
             error = {"code": row["error_code"] or "network", "message": row["error"],
@@ -1134,6 +1152,8 @@ class Engine:
             self._show_menu_bar(changed["tray"])
         if "update_check" in changed:
             self.updates.wake()
+        if "auto_reset" in changed:
+            reset_auto.rearm(self)           # off and on again is how the user starts it after it stopped itself
         if changed.get("claude_resets"):
             keys = [row["id"] for row in self.store.accounts() if row["provider"] in ("claude", "claude_cli")]
             now = self.clock()
@@ -1268,8 +1288,10 @@ class Engine:
                         self.bump()
                         return
                     with self.cli.gate(key):
-                        live = self.cli.adapter.current()
-                        if live["identity"] == account["identity"]:
+                        # In use: the login Claude Code holds, or, while it holds none, the account its settings
+                        # still name. That one is shown as in use, and the login saved here may go back in
+                        # (switch_cli.repair). Signed out of every account known here: none is in use.
+                        if account["identity"] in (self.cli.adapter.active_identity(), self.active_identity.get("claude_cli")):
                             raise DeckError("The account in use by your terminals cannot be removed.", "invalid")
                         self.accounts.remove(key)
                 self.scheduler.forget(key)
@@ -1398,9 +1420,11 @@ class Engine:
         """`settled`: what `auto_recover` did as this job ended."""
         if getattr(op, "preempted", None) and report["outcome"] == "cancelled":
             cli_auto.made_way(self, op)
-        # A use of a limit reset records its own line: who, which reset, the outcome (resets.ResetOperation).
+        # A use of a limit reset records its own line: who, which reset, the outcome (resets.ResetOperation). An
+        # automatic one tells of itself (reset_auto.finished: its event, its alert, what the next tick waits for).
+        told = reset_auto.finished(self, op, report, now)
         summary = diagnostics.redact_text(getattr(op, "event_text", None) or report["summary"] or "")
-        if report["outcome"] in ("success", "failed") and op.kind != "remove" and summary and summary != "Done.":
+        if not told and report["outcome"] in ("success", "failed") and op.kind != "remove" and summary and summary != "Done.":
             self.store.event(op.kind, summary)
         if report.get("manifest"):
             self.store.set_setting("last_manifest", report["manifest"])

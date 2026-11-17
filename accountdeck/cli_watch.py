@@ -36,6 +36,7 @@ from . import activity, cli_auto, diagnostics
 from .config import cli_custom_home, safe_mode
 from .core import is_frozen
 from .procs import is_test_owned_path
+from .rules import FABLE
 from .usage import number, timestamp
 
 MARK = b'"isApiErrorMessage":true'       # Claude Code's JSON has no spaces, and a text quoting this has `\"`
@@ -598,8 +599,9 @@ class LimitWatch:
             return "settling"
         if signal["kind"] == "auth":
             return None
-        # Auto-switch watches only the pinned model's limit (cli_policy.considered), so no other can pick a target.
-        if signal["kind"] == "model" and not _same_model(signal["model"], engine.prefs.get("pinned_model") or ""):
+        # Auto-switch watches Fable's limit and the pinned model's (cli_policy.considered), so no other can pick a target.
+        if signal["kind"] == "model" and not any(_same_model(signal["model"], name)
+                                                 for name in (FABLE, engine.prefs.get("pinned_model") or "")):
             return "unwatched"
         ended = _ended(signal, row, engine.prefs.get("cli_threshold"), now)
         if ended:

@@ -116,10 +116,12 @@ class Operation:
     @contextlib.contextmanager
     def step(self, step_id, *, phase=None, message=None, cancellable=None, eta_seconds=None):
         """Run the block as step `step_id`: active, then done (or the warning/skipped status note()
-        gave it), failed on an error, skipped when cancelled or reconfirming. Entering is a checkpoint."""
-        self.checkpoint()
+        gave it), failed on an error, skipped when cancelled or reconfirming. Entering is a checkpoint, made under the
+        lock OperationRunner.cancel takes: a cancel it accepted ends the job here, and is never left unheeded by a step
+        that cannot be cancelled."""
         step = self._step(step_id)
         with self.lock:
+            self.checkpoint()
             self._apply(phase, message, cancellable, eta_seconds)
             step.status, step.started, step.ended = "active", self.clock(), None
             self.current_step = step.id

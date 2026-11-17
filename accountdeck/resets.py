@@ -2,12 +2,16 @@
 account and one reset the user confirmed (the `reset_credits` rows and the `resets` block of the state, the actions
 `reset-plan` and `use-reset`).
 
-A limit reset is never used automatically. Only `use-reset` uses one, for the account and the row of a plan the user
-confirmed within its five minutes; nothing else here sends a claim or a consume, and nothing calls `use` but the
-action. The scheduler, the auto-switch, the limit-error watch, the runway, the alerts and the recommender never reach
-it. Never two resets for one click: the request key (Codex's `idempotencyKey`, Claude's `request_id`) is saved before
-the request is sent, the same key is sent again for the same reset while its outcome is not known (Claude: 10
-minutes, Codex: 24 hours, as their own clients do), and a new one is made only once a reading has settled it.
+A limit reset is used in two ways only, and both run the one operation here (`ResetOperation`, `Resets.run`).
+`use-reset` uses one for the account and the row of a plan the user confirmed within its five minutes. With the
+setting `auto_reset` on (off by default), reset_auto.py uses one Claude Code reset when every terminal account
+auto-switch could use is out (`Resets.use_automatically`): one at a time, and never another before a reading showed
+how the last went. Nothing else sends a claim or a consume: the scheduler, the auto-switch, the limit-error watch,
+the runway, the alerts and the recommender never reach it, and a Codex or Claude Desktop reset is never used
+automatically. Never two resets for one click or one decision: the request key (Codex's `idempotencyKey`, Claude's
+`request_id`) is saved before the request is sent, the same key is sent again for the same reset while its outcome is
+not known (Claude: 10 minutes, Codex: 24 hours, as their own clients do), and a new one is made only once a reading
+has settled it.
 
 What reaches the state, the log, an error or a process argument never names a provider's id of a reset, an
 organisation, a token or a request key: a row's `key` is AccountDeck's own hash. The ids live only in the service's
@@ -83,6 +87,7 @@ NOT_KNOWN = "It is not known whether the limit reset was used. AccountDeck is re
 SAID = ("No limit reset was used", "It is not known whether")     # how a report's summary starts (the dashboard reads it)
 CHANGED = "this limit reset changed since you reviewed it. Review the account again."
 GONE = "this limit reset is no longer there. Review the account again."
+AUTO_STALE = "this limit reset is not as AccountDeck last read it. It has been read again."    # nobody reviewed it
 STALE_PLAN = "This plan has expired. Review it again."                                         # = switching
 
 CODEX_BELOW_80 = "No limit is below 80% left, so there is nothing to reset right now."
@@ -138,6 +143,7 @@ UNAVAILABLE = {
 }
 UNAVAILABLE_OTHER = "Anthropic says this limit reset cannot be used right now."
 # Why a claim used nothing (`_claim_verdict`), as the end of "No limit reset was used: …".
+NOT_NEEDED = "the terminal accounts are no longer all out."      # an automatic use, asked again before sending
 CLAIM_UNUSED = {
     "already_used": "this limit reset was already used.",
     "not_limited": "it works only at a usage limit, and the account is not at one now.",
@@ -327,6 +333,39 @@ def pending_ok(pending) -> bool:
             and type(pending.get("before")) is int and pending.get("sent") is True and _maybe(pending.get("ends")))
 
 
+def auto_ok(auto) -> dict:
+    """What reset_auto.py keeps (`Resets.set_auto`: `last`, `failed`, `stopped`), read back. A part that is not in the
+    shape it writes is left out, and automatic resets then count as stopped: what held the next one back is gone."""
+    if auto is None:
+        return {}
+    damaged = not isinstance(auto, dict)
+    auto, clean = auto if isinstance(auto, dict) else {}, {}
+    last, failed, stopped = auto.get("last"), auto.get("failed"), auto.get("stopped")
+    if last is not None:
+        if (isinstance(last, dict) and isinstance(last.get("account"), str) and last["account"] and _number(last.get("at"))
+                and _words(last.get("limits")) and isinstance(last.get("open"), bool)
+                and isinstance(last.get("unsure", False), bool)):
+            clean["last"] = {"account": last["account"], "at": last["at"], "limits": list(last["limits"]),
+                             "open": last["open"], "unsure": last.get("unsure", False)}
+        else:
+            damaged = True
+    if failed is not None:
+        if (isinstance(failed, dict) and _number(failed.get("at")) and type(failed.get("count")) is int
+                and failed["count"] >= 1 and isinstance(failed.get("account"), str)):
+            clean["failed"] = {"at": failed["at"], "count": failed["count"], "account": failed["account"]}
+        else:
+            damaged = True
+    if stopped is not None:
+        if isinstance(stopped, dict) and _number(stopped.get("at")):
+            clean["stopped"] = {"at": stopped["at"]}
+        else:
+            damaged = True
+    if damaged:
+        clean.setdefault("stopped", {"at": 0})
+        diagnostics.log("resets.memory_dropped", "warning", what="auto")
+    return clean
+
+
 def clean_memory(stored) -> dict:
     """What this module kept (`MEMORY`), with everything that is not in the shape it writes left out: a damaged or
     hand-edited value never stops the service. A request key that cannot be read is logged, since its doubt ends."""
@@ -354,9 +393,12 @@ def clean_memory(stored) -> dict:
                 kept["pending"] = entry["pending"]
             else:
                 diagnostics.log("resets.memory_dropped", "warning", acct=diagnostics.account_ref(key), what="pending")
+        if _number(entry.get("used")):
+            kept["used"] = entry["used"]
         if kept:
             clean[key] = kept
-    return {"accounts": clean}
+    auto = auto_ok(stored.get("auto") if isinstance(stored, dict) else None)
+    return {"accounts": clean, **({"auto": auto} if auto else {})}
 
 
 class Resets:
@@ -405,6 +447,85 @@ class Resets:
     def entry(self, key):
         with self.lock:
             return copy.deepcopy(self.memory["accounts"].get(key) or {})
+
+    # ---- automatic use (reset_auto.py decides; what it remembers is kept here, with the request keys) ----
+    def auto(self):
+        """What reset_auto remembers: {"last", "failed", "stopped"}, each only while there is one."""
+        with self.lock:
+            return copy.deepcopy(self.memory.get("auto") or {})
+
+    def set_auto(self, *, update=None, **parts):
+        """Keeps what reset_auto remembers, written through: each of `parts` ("last", "failed", "stopped") replaces
+        that part (None removes it), and `update` changes fields of the `last` that is there."""
+        with self.lock:
+            auto = self.memory.setdefault("auto", {})
+            for name, value in parts.items():
+                if value is None:
+                    auto.pop(name, None)
+                else:
+                    auto[name] = copy.deepcopy(value)
+            if update and isinstance(auto.get("last"), dict):
+                auto["last"].update(update)
+            if not auto:
+                self.memory.pop("auto", None)
+            self._save()
+
+    def _auto_verdict(self, key, verdict, now):
+        """Caller holds the lock and saves. The request of an automatic use that was not known to have gone through is
+        settled: used counts from now (a reading has yet to show the refill), not used is one more try that used
+        nothing."""
+        auto = self.memory.get("auto") or {}
+        last = auto.get("last") or {}
+        if not (last.get("open") and last.get("unsure") and last.get("account") == key):
+            return
+        if verdict == "used":
+            last.update(at=now, unsure=False)
+        elif verdict == "unused":
+            failed = auto.get("failed") or {}
+            auto["failed"] = {"at": now, "count": int(failed.get("count") or 0) + 1, "account": key}
+            auto.pop("last", None)
+
+    def any_open_request(self):
+        """Whether any Claude account's request key is open: a use whose outcome is not known yet. A Codex one (open
+        for up to a day) says nothing about a Claude account."""
+        with self.lock:
+            return any((pending := entry.get("pending") or {}).get("sent") and pending.get("provider") in CLAUDE
+                       for entry in self.memory["accounts"].values())
+
+    def used_at(self):
+        """{account id: when a limit reset was last used on it through AccountDeck, by the user or automatically}
+        (`_note_used`). A reading that is not newer shows the account as it was before that reset."""
+        with self.lock:
+            return {key: entry["used"] for key, entry in self.memory["accounts"].items() if _number(entry.get("used"))}
+
+    def _note_used(self, row, now):
+        """Caller holds the lock and saves. A limit reset was used on this Claude account, whichever of its app
+        entries it was used from."""
+        for member in self._members(row):
+            self._entry(member["id"])["used"] = now
+
+    def open_request(self, row):
+        return bool(self._pending(row))
+
+    def usable_rows(self, row, now):
+        """The rows `reset-plan` would offer for this account right now, each with its grant (`_grant`): none while
+        anything blocks a use (`blockers`, a running action and an open sign-in among them). Never raises."""
+        try:
+            rows, block = self._view(row, now, transient=True)
+        except Exception as exc:
+            diagnostics.log_exception("resets.view_failed", exc, acct=diagnostics.account_ref(row["id"]))
+            return []
+        if block is None or block["blockers"]:
+            return []
+        return [item for item in rows if item["usable"]]
+
+    def use_automatically(self, row, chosen, automatic):
+        """reset_auto's one way in: the operation a confirmed plan starts, for a Claude Code row `usable_rows` just
+        gave. `automatic["confirm"]()` is asked right before the request is sent (`_use_claude`), and
+        `automatic["why"]` goes into its report."""
+        if row["provider"] != "claude_cli" or not chosen.get("usable"):
+            raise DeckError(NONE_USABLE, "blocked")
+        return self.engine.submit(ResetOperation(self, row, chosen, automatic=automatic))
 
     def forget(self, key):
         """The account was removed: what was kept about its resets goes too."""
@@ -523,7 +644,10 @@ class Resets:
             else:
                 verdict = "unused"
             self._entry(key).pop("pending", None)
+            self._auto_verdict(key, verdict, now)
             verdicts.append(verdict)
+        if "used" in verdicts:
+            self._note_used(row, now)
         return "used" if "used" in verdicts else "unused" if verdicts else None
 
     def _settle_codex(self, row, credits, now):
@@ -970,7 +1094,7 @@ class Resets:
                     # is the same one; either way nothing more is sent now: a second reset needs a new review.
                     if (open_before or {}).get("target") == grant_id:
                         return _used(op, row, title, earlier=True)
-                    raise _unused(op, row, title, CHANGED, "stale_plan")
+                    raise _unused(op, row, title, _stale(op, CHANGED), "stale_plan")
                 with self.lock:
                     pending = copy.deepcopy(self._entry(key).get("pending"))
                 if pending and pending.get("provider") in CLAUDE and pending.get("sent"):
@@ -982,11 +1106,18 @@ class Resets:
                 grant = found["_grant"] if found else None
                 if not parsed["eligible"] or grant is None or grant["paused"] or grant["left"] < 1 or (
                         grant["ends"] is not None and grant["ends"] <= now):
-                    raise _unused(op, row, title, GONE, "stale_plan")
+                    raise _unused(op, row, title, _stale(op, GONE), "stale_plan")
                 if not found["usable"] or _shown(found) != _shown(chosen):
-                    raise _unused(op, row, title, CHANGED, "stale_plan")     # also a count that is not the one confirmed
+                    # Also a count that is not the one confirmed.
+                    raise _unused(op, row, title, _stale(op, CHANGED), "stale_plan")
+                # An automatic use was chosen for the limits this reset refills: by Anthropic's fresh answer too.
+                if op.automatic is not None and not set(op.automatic["limits"]) <= set(grant["clears"]):
+                    raise _unused(op, row, title, AUTO_STALE, "stale_plan")
             with op.step("send", phase="saving", message="Using the limit reset…", cancellable=False):
                 op.checkpoint()               # a Cancel that came while the step began: nothing is sent
+                # An automatic use: is it still called for, now that the look is done? (reset_auto.tick)
+                if op.automatic is not None and not op.automatic["confirm"]():
+                    raise _unused(op, row, title, NOT_NEEDED, "stale_plan")
                 request = self._keep_key(row, chosen, grant_id, grant["left"], pending)
                 governor.record(gkey, engine.clock())
                 op.sent = True
@@ -1061,6 +1192,8 @@ class Resets:
                     if grant["id"] == grant_id:
                         grant["left"] = min(grant["left"], before - 1)
             self._entry(row["id"]).pop("pending", None)
+            self._auto_verdict(row["id"], "used", self.engine.clock())
+            self._note_used(row, self.engine.clock())
             self._save()
 
     # -- the request key --
@@ -1096,16 +1229,18 @@ class Resets:
 
 
 class ResetOperation(Operation):
-    """`use-reset`: one limit reset of one account (Resets.run). Not cancellable once the request is being sent."""
+    """`use-reset`: one limit reset of one account (Resets.run). Not cancellable once the request is being sent.
+    `automatic`: None for the user's own use, else what reset_auto.py gave (`Resets.use_automatically`)."""
 
     not_cancellable_message = "The limit reset is being sent and cannot be stopped now."
 
-    def __init__(self, resets, row, chosen):
+    def __init__(self, resets, row, chosen, automatic=None):
         super().__init__("use-reset", provider=row["provider"], account=row["id"], label=row["label"] or row["email"],
                          steps=(("look", "Checking the limit reset again"), ("send", "Using the limit reset")))
-        self.resets, self.row, self.chosen = resets, row, chosen
+        self.resets, self.row, self.chosen, self.automatic = resets, row, chosen, automatic
         self.event_text = None
         self.sent = False                 # the request went out (or is about to): a failure after this is "not known"
+        self.unsure = False               # it ended without knowing whether the reset was used (`_unknown`)
 
     def run(self):
         self.resets.run(self, self.row, self.chosen)
@@ -1182,11 +1317,19 @@ def _lead(text):
     return text if not text or text.startswith(_NAMES) else text[0].lower() + text[1:]
 
 
+def _stale(op, words):
+    """CHANGED or GONE as an automatic use says it: nobody reviewed anything."""
+    return words if op.automatic is None else AUTO_STALE
+
+
 def _used(op, row, title, *, earlier=False):
     label = op.label or "the account"
     if earlier:
         op.report["summary"] = f"The earlier {title} on {label} went through. Its limits are being read again."
         op.event_text = f"The earlier {title} on {label} went through."
+    elif op.automatic is not None:
+        op.event_text = f"AccountDeck used one {title} on {label} by itself: {op.automatic['why']}."
+        op.report["summary"] = f"{op.event_text} Its limits are being read again."
     else:
         op.report["summary"] = f"Used one {title} on {label}. Its limits are being read again."
         op.event_text = f"Used one {title} on {label}."
@@ -1200,7 +1343,10 @@ def _unused(op, row, title, words, code):
 
 
 def _unknown(op, row, title):
-    op.event_text = f"Not known whether the {title} on {op.label or 'the account'} was used."
+    label = op.label or "the account"
+    op.unsure = True
+    op.event_text = (f"AccountDeck tried one {title} on {label} by itself. It is not known yet whether it was used."
+                     if op.automatic is not None else f"Not known whether the {title} on {label} was used.")
     return DeckError(NOT_KNOWN, "timeout")
 
 

@@ -17,7 +17,7 @@ from pathlib import Path
 import shutil
 import time
 
-from . import activity, contract, diagnostics
+from . import activity, contract, diagnostics, switch_codex
 from .accounts import HEALTH_MESSAGES
 from .claude_verify import (NOT_OPENED, OPEN_IT, BackgroundVerifier, Verdict, Verifier, cache_org, config_keys,
                             files_present, generation_digest, log_size, log_text, mcp_names, token_cache_summary,
@@ -48,6 +48,7 @@ LOGIN_BUSY_MESSAGE = "Finish or cancel the current sign-in first."
 NO_APP_MESSAGE = ("AccountDeck cannot find Claude in Applications, so it left Claude alone. "
                   "Install Claude in the Applications folder, then try again.")
 REOPENED = "Claude was reopened with the same account."
+STARTED_AGAIN = "Claude was opened again, so AccountDeck left its sign-in as it is. Try again."
 NOT_REOPENED = f"Claude was closed and could not be reopened by AccountDeck. {OPEN_IT}."
 STILL_QUITTING_MESSAGE = "Claude is still quitting, so AccountDeck could not open it again yet."
 NOT_FOUND_MESSAGE = "AccountDeck cannot find Claude in Applications."
@@ -676,11 +677,17 @@ class ClaudeJob(Operation):
             return False
         return True
 
-    def _point_of_no_return(self, message):
-        """The last cancellation point: from here the job finishes or puts everything back."""
+    def _point_of_no_return(self, message, *, closed=True):
+        """The last cancellation point: from here the job finishes or puts everything back. With `closed` (every
+        job that closed Claude), also the last look that Claude is still closed: one opened since this job closed
+        it (by the user, a login item, a link) would have its sign-in files replaced while it runs."""
         self.set_phase("restoring", message, cancellable=False)
         with self._guard():
             self.checkpoint()
+            if closed:
+                current = observe(self.ctx)
+                if current.desktop or current.code or current.unknown:
+                    raise DeckError(STARTED_AGAIN, "busy")
 
     def _undo(self, exc):
         """A write failed: the transaction puts the files back, Claude reopens as it was and the job ends."""
@@ -1202,6 +1209,7 @@ class Recover(ClaudeJob):
             ("prepare", "Checking what to recover"), ("wait", "Waiting for Claude to finish"), ("stop", "Closing Claude"),
             ("settle", "Waiting for Claude to let go of its files"), ("restore", "Putting the previous sign-in back"),
             ("launch", "Opening Claude"), ("report", "Done")))
+        self.codex_said = None
 
     def _body(self):
         ctx = self.ctx
@@ -1213,7 +1221,7 @@ class Recover(ClaudeJob):
         else:
             for step_id in ("wait", "stop", "settle"):
                 self.note("Claude isn't involved.", step_id=step_id, status="skipped")
-        self._point_of_no_return("Putting the previous sign-in back…")
+        self._point_of_no_return("Putting the previous sign-in back…", closed=involves_claude)
         kept_sessions = False
         with self.step("restore", phase="restoring", message="Putting the previous sign-in back…", cancellable=False):
             for tx in pending:
@@ -1225,9 +1233,10 @@ class Recover(ClaudeJob):
             self.note("Claude was not running." if involves_claude else "Claude isn't involved.", step_id="launch",
                       status="skipped")
         with self.step("report"):
-            self.report["summary"] = "Your previous sign-in is back." + (
-                " Code sessions started since were kept." if kept_sessions else "") + (
-                " Claude was reopened." if involves_claude and self.was_running and self.opened else "")
+            said = ("Your previous sign-in is back." if involves_claude or not self.codex_said else None,
+                    "Code sessions started since were kept." if kept_sessions else None, self.codex_said,
+                    "Claude was reopened." if involves_claude and self.was_running and self.opened else None)
+            self.report["summary"] = " ".join(part for part in said if part)
 
     def _load_pending(self):
         ctx, found = self.ctx, []
@@ -1245,7 +1254,16 @@ class Recover(ClaudeJob):
         if tx.doc.get("provider") == "codex":
             if ctx.procs.codex_consumers() or ctx.procs.codex_daemon():
                 raise DeckError("Close your Codex sessions, then try again.", "busy")
-            tx.rollback()
+            said = switch_codex.recover_one(ctx, tx)
+            if said != switch_codex.RESTORED:
+                self.codex_said = said          # Codex keeps what it holds: the summary says so
+            return False
+        if tx.doc.get("purpose") == "recover":
+            # A Recover cut short before its own record closed: that record's "before" is the switch's target, so
+            # replaying it would undo the Recover. The switch's record, still open as it closes last, puts the
+            # previous account back whichever of the two comes first.
+            tx.doc["status"] = "superseded"
+            tx.save()
             return False
         outgoing = tx.doc.get("outgoing_id")
         if not outgoing or ctx.store.account(outgoing) is None:

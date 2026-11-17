@@ -6,7 +6,7 @@ import threading
 import time
 import uuid
 
-from . import diagnostics
+from . import diagnostics, intel
 from .cli_locks import credential_locks
 from .core import DeckError, OwnerLock, is_frozen
 from .providers.claude_cli import expires, fingerprint, login_end, object_file, oauth, plan_of, profile
@@ -41,6 +41,9 @@ REFUSED = "Claude refused this terminal login twice. Sign in again to repair thi
 LIVE_REFUSED = "Claude refused the login your terminals hold. The other login saved for this account is kept."
 LIVE_LOST = "Your terminals lost this account's login. AccountDeck is giving them the login saved here."
 RECOVERING = "An interrupted switch is not settled yet, so this terminal login is not renewed yet. Its last reading is kept."
+# A /login caught half way (its token is written before the account's name), or one that ended there.
+DISAGREE = ("Claude Code's account and login disagree. If a sign-in is running in a terminal, let it finish; "
+            "if not, run /login in a terminal again.")
 LIVE_RECORD = "cli-live"      # the vault record of `_live`
 
 
@@ -373,7 +376,7 @@ class CLIAccounts:
                     with self.gate(row["id"]):
                         self._drop_foreign(row["id"], saved["fingerprint"])
                     continue
-                raise DeckError("Claude Code's account and login disagree. Wait for sign-in to finish.", "identity")
+                raise DeckError(DISAGREE, "identity")
         return live
 
     def save(self, incoming, *, source="capture", drop=True):
@@ -792,7 +795,7 @@ class CLIAccounts:
             current = self.store.account(row["id"])
             if current is None or fetched <= (current["last_good_at"] or 0):
                 return False
-            self.store.observe(row["id"], usage, at=fetched)          # clears the row's error
+            self._observe(row["id"], usage, fetched, current["last_good_usage"])      # clears the row's error
             if current["error_code"] is not None and (current["error_code"] not in CACHED_ENDS
                                                       or current["flags"].get("health", "ok") != "ok"
                                                       or (current["paused_until"] or 0) > now):
@@ -800,6 +803,14 @@ class CLIAccounts:
         diagnostics.log("cli.cached_reading", lvl="debug", acct=diagnostics.account_ref(row["id"]), age=round(now - fetched))
         self.engine.bump()
         return True
+
+    def _observe(self, key, usage, at, previous):
+        """Stores a reading, and first each refill it shows against `previous`, the account's last good reading, as
+        the other apps' reads do (intel.detect_refill): the row says "refilled" and the refill alert comes."""
+        for refill in intel.detect_refill(previous, usage):
+            self.store.record_refill(key, refill["window"], reset_at=refill["reset_at"],
+                                     confirmed_at=refill["confirmed_at"], previous_used=refill["previous_used"])
+        self.store.observe(key, usage, at=at)
 
     def read(self, key):
         lock_for = getattr(self.engine.scheduler, "account_lock", None)
@@ -873,7 +884,8 @@ class CLIAccounts:
                 if active:
                     flags.setdefault("health", "ok")     # what the terminals hold works
                 with self.mutex:
-                    self.store.observe(key, data, at=now)
+                    current = self.store.account(key)
+                    self._observe(key, data, now, current["last_good_usage"] if current else None)
                     self._settle_read(key, flags, credentials=credentials, credential_state="live" if active else "fresh",
                                       last_outcome="2xx", paused_until=None, expires_at=expires(credentials),
                                       **self._plan(row, saved))

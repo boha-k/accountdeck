@@ -745,6 +745,16 @@ def _limit_resets(v):
         return [_check("resets.held", "warn", text + f" {doubts} use{'s' if doubts > 1 else ''} of a limit reset "
                        f"{'have' if doubts > 1 else 'has'} no known outcome yet.",
                        "AccountDeck settles it at the account's next reading; trying again sends the same request.")]
+    auto = memory.get("auto") if isinstance(memory, dict) and isinstance(memory.get("auto"), dict) else {}
+    if v.store.setting("auto_reset", False) is True:
+        if auto.get("stopped"):           # reset_auto.py stopped itself: only the user starts it again
+            return [_check("resets.held", "warn", text + " Automatic limit resets stopped themselves: the last one did "
+                           "not refill its account.",
+                           "Turn “Use a limit reset when every terminal account is out” off and on in Settings.")]
+        waits = [name for key, name in (("cli_autoswitch", "auto-switch"), ("claude_resets", "reading Claude's limit resets"))
+                 if v.store.setting(key, True) is False]
+        text += (f" Automatic limit resets are on but do nothing while {' and '.join(waits)} {'are' if len(waits) > 1 else 'is'} off."
+                 if waits else " Automatic limit resets are on.")
     return [_check("resets.held", "ok", text)]
 
 

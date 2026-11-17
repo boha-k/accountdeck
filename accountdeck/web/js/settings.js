@@ -1,7 +1,8 @@
 /* AccountDeck 2 — the Settings window, laid out like System Settings: a sidebar of panes and, for
  * each pane, grouped rows with the label on the left and the control (a switch, a segmented
  * control, a pop-up button, a stepper) on the right.
- * Panes: General, Auto-Switch, Notifications, Menu Bar & Login, Advanced (usage checks, Claude limit resets), About
+ * Panes: General, Auto-Switch (with automatic limit resets), Notifications, Menu Bar & Login, Advanced (usage
+ * checks, Claude limit resets), About
  * (with the update check: the update_check switch, what the last check found and Check Now; update.js has the words).
  * Service settings go through /api/settings; the appearance, Hide emails and browser notifications belong to this
  * browser. The open pane is rebuilt only when what it shows changed, and data-keep carries focus.
@@ -210,11 +211,17 @@
     const threshold = Number.isFinite(prefs.cli_threshold) ? prefs.cli_threshold : 95;
     // The 5-hour limit only while an account reports one (Claude has reported none since 2026-10-31).
     const hint = A.showsSession(A.terminals(state)) ? S.thresholdHint : S.thresholdHintWeekly;
+    // Automatic limit resets: the service's words when it stopped itself, else what it does and what it needs.
+    const resetting = (A.provider(state) || {}).auto_reset || {};
+    const needs = prefs.cli_autoswitch === false || prefs.claude_resets === false;
+    const resetHint = resetting.stopped || [S.autoResetHint, threshold > 97 ? fill(S.autoResetPoint, { percent: threshold }) : null,
+      S.autoResetOnce, needs ? S.autoResetNeeds : null].filter(Boolean).join(' ');
     return [
       group(null, [
         serverSwitch(prefs, 'cli_autoswitch', S.auto, S.autoHint),
         row(S.threshold, hint, thresholdStepper(threshold), { forId: 'setting-cli_threshold' }),
         serverSwitch(prefs, 'cli_early_switch', S.early, S.earlyHint),
+        'auto_reset' in prefs ? serverSwitch(prefs, 'auto_reset', S.autoReset, resetHint) : null,
       ]),
       group(S.order, [
         row(S.orderBy, null, el('span', 'popup', select, AD.dom.svgIcon('chevrons', { className: 'popup-chevrons' })), { forId: 'setting-cli_order' }),

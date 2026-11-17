@@ -9,6 +9,7 @@ from unittest import mock
 
 from tests.helpers import CODEX_RATES, SyntheticTestCase, codex_auth
 
+from accountdeck import switch_codex
 from accountdeck.core import DeckError
 from accountdeck.procs import FakeProcessController
 from accountdeck.providers import codex as codex_module
@@ -222,6 +223,46 @@ class CodexRenewalTests(SyntheticTestCase):
         self.assertEqual(json.loads(self.auth.read_text()), self.before)     # put back, its token never sent
         self.assertNotIn("rt-before", self.sent)
         self.assertFalse(self.engine.login_held("acct-saved"))
+
+    def test_recover_keeps_a_login_codex_renewed_after_the_interrupted_switch(self):
+        self.auth.write_text(json.dumps(self.before))
+        self.engine.sense_active()
+        other = codex_auth("acct-other", exp=time.time() + 10 * 86400, refresh="rt-other")
+        target = self.engine.accounts.save("codex", other, self.codex.identity(other))
+        opened = []
+
+        def session_starts():           # while the switch checks its target: the switch is left for Recover
+            if not opened:
+                opened.append(self.engine.procs.add_codex("codex_tui").pid)
+                raise codex_module.ProviderError("identity", message="Codex returned a different account.")
+        plan = self.engine.action("switch-plan", {"id": target})["plan"]
+        with self.helper(meanwhile=session_starts):
+            self.engine.action("switch", {"id": target, "plan_id": plan["plan_id"], "consent": "now"})
+            self.assertTrue(self.engine.runner.wait(10))
+        # That session renews the login it found in auth.json, the target's, and ends.
+        renewed = codex_auth("acct-other", exp=time.time() + 20 * 86400, refresh="rt-other-renewed")
+        self.auth.write_text(json.dumps(renewed))
+        self.engine.procs.exit_process(opened[0])
+        plan = self.engine.action("switch-plan", {"provider": "codex", "purpose": "recover"})["plan"]
+        self.engine.action("recover", {"provider": "codex", "plan_id": plan["plan_id"], "consent": "now"})
+        self.assertTrue(self.engine.runner.wait(10))
+        self.assertEqual(self.engine.runner.report()["outcome"], "success")
+        self.assertEqual(self.engine.runner.report()["summary"], switch_codex.KEPT)
+        self.assertEqual(json.loads(self.auth.read_text()), renewed)          # Codex keeps the newer login ...
+        self.assertEqual(self.engine.vault.get(target), renewed)              # ... saved as its own account's
+        self.assertEqual(self.engine.vault.get(self.key), self.before)
+        self.assertEqual((self.engine.recovery, self.engine.login_held("acct-saved")), ([], False))
+
+    def test_a_sign_in_left_by_an_add_cut_short_is_saved_at_start(self):
+        # A crash during a Codex Add leaves its sign-in folder behind, with the sign-in that finished there in the clear.
+        home = self.paths.data_dir / "work" / "login-cut-short"
+        home.mkdir(parents=True)
+        added = codex_auth("acct-added", exp=time.time() + 5 * 86400, refresh="rt-added")
+        (home / "auth.json").write_text(json.dumps(added))
+        self.engine.stop()
+        engine = self.make_engine(codex=self.codex)     # the next start
+        self.assertEqual(engine.vault.get(engine.store.find("codex", "acct-added")["id"]), added)
+        self.assertFalse(home.exists())
 
     def test_a_renewal_that_never_left_this_mac_costs_nothing(self):
         with mock.patch.object(self.codex, "token_endpoint_answers", return_value=False), self.helper():

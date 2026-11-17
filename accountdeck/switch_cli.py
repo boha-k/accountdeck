@@ -7,9 +7,9 @@ import json
 import sqlite3
 
 from . import cli_auto, diagnostics
-from .cli_accounts import ON_HOLD, TargetError
+from .cli_accounts import DISAGREE, ON_HOLD, TargetError
 from .cli_locks import config_lock, credential_locks
-from .cli_policy import considered
+from .cli_policy import DRAIN_CEILING, considered
 from .rules import plan_current, plan_target
 from .core import UNFINISHED, DeckError, FileTransaction, atomic_write, is_frozen, json_bytes
 from .operations import Operation
@@ -305,6 +305,12 @@ def perform(service, key):
                             raise
                         previous = known["id"]  # blank revoked stub: retain the last encrypted generation
                     else:
+                        # A /login writes its token before `.claude.json` names the new account: a token the
+                        # provider said is another account's is never filed under the one named. Only what
+                        # `mirror` already asked counts, so no network call runs under these locks; an owner not
+                        # known yet does not stop the switch (an outage of that endpoint would stop every one).
+                        if service.owners.get(outgoing["fingerprint"]) not in (None, outgoing["identity"]):
+                            raise DeckError(DISAGREE, "identity")
                         # Its cross-check refuses a login another record holds rather than wait for that key lock.
                         previous = service.save(outgoing, source="sync-back", drop=False)
                 composed = merge(target["credentials"], credentials)
@@ -358,7 +364,7 @@ def repair(service, key):
                 raise
             found = None
         if found not in (None, row["identity"]):
-            raise DeckError("Claude Code's account and login disagree. Wait for sign-in to finish.", "identity")
+            raise DeckError(DISAGREE, "identity")
         store = service.adapter.store
         tx = CLITransaction(service)
         with _undoing(service, tx):
@@ -452,10 +458,14 @@ class CLISwitch(Operation):
             with cli_auto.history(self.engine) as history:
                 history.update(left=previous, left_at=now, exhausted=False)    # any switch, manual too, ends it
                 if self.auto_kind == "manual":
-                    history["manual_at"] = now
+                    # The user's own choice, Undo included: cli_policy holds it against the threshold switch.
+                    history["manual_at"], history["manual_for"] = now, self.account
                     if history.get("last"):
                         history["last"]["undo_until"] = now
                 else:
+                    # The choice held while the terminals stayed on the account chosen: one they come back to by
+                    # themselves is left at the switch point like any other.
+                    history.pop("manual_for", None)
                     history["last"] = {"from": previous, "to": self.account, "at": now, "kind": self.auto_kind,
                         "reason": self.reason, "undo_until": now + 600}
                     if self.auto_kind == "early":
@@ -516,7 +526,9 @@ def plan(engine, key, purpose="switch"):
         account_bound=[], invisible=None, stop_tier="not_running")
     planned.plan.update(confirmation_required=True, remember_available=False)
     if any(used is not None and used >= engine.prefs.get("cli_threshold") for _, used, _ in considered(target, engine.prefs.public())):
-        planned.plan["warnings"].append({"code": "rate_limited", "message": "This account is over your auto-switch threshold; auto-switch may fire again."})
+        planned.plan["warnings"].append({"code": "rate_limited", "message": (
+            "This account is over your auto-switch threshold. Auto-switch leaves your choice alone for 2 hours, or "
+            f"until the account reaches {DRAIN_CEILING}% or a limit.")})
     return register(context(engine), planned)
 
 

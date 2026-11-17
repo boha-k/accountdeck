@@ -95,19 +95,39 @@ def pinned_match(names, pinned):
     return bool(pinned) and any(isinstance(name, str) and name.casefold().startswith(pinned) for name in names)
 
 
+# The model whose weekly limit holds the terminals whatever is pinned: Settings says "weekly or Fable 5.1 weekly
+# limit", and for anyone working on Fable it is the limit that runs out first.
+FABLE = "Fable"
+
+
+def model_names(window):
+    """The names a per-model limit goes by: its model, and its label without " weekly"."""
+    return window.get("model"), (window.get("label") or "").removesuffix(" weekly")
+
+
+def is_fable(window):
+    """True for Fable's weekly limit (a "Fable 5.1" limit too)."""
+    return window.get("kind") == "model" and pinned_match(model_names(window), FABLE)
+
+
+def watched_model(names, pinned):
+    """Whether a model's weekly limit holds the terminals: Fable's always, another model's while it is pinned."""
+    return pinned_match(names, FABLE) or pinned_match(names, pinned)
+
+
 def holds_terminals(window, pinned):
     """The one rule for which limits hold Claude Code terminals, at any percentage and when locked (the policy's
-    `considered` and `blocked`, and the state's `blocked` code): the 5-hour and weekly limits, the pinned model's,
-    and a meter usage.py marked `gates`, one scoped to a model only while that model is pinned. Not another
-    model's, another surface's, nor a codename's (`usage._no_meter`: its lock shows, but a lock on all of
-    them at once must never leave the terminals nowhere to go, and hitting a real one stops a terminal, which
-    the transcript watch reports)."""
+    `considered` and `blocked`, and the state's `blocked` code): the 5-hour and weekly limits, Fable's weekly limit,
+    the pinned model's, and a meter usage.py marked `gates`, one scoped to a model only while that model is Fable or
+    pinned. Not another model's, another surface's, nor a codename's (`usage._no_meter`: its lock shows, but a lock
+    on all of them at once must never leave the terminals nowhere to go, and hitting a real one stops a terminal,
+    which the transcript watch reports)."""
     kind = window.get("kind")
     if kind in ("session", "weekly"):
         return True
     if kind == "model":
-        return pinned_match((window.get("model"), (window.get("label") or "").removesuffix(" weekly")), pinned)
-    return bool(window.get("gates")) and (not window.get("scope") or pinned_match((window["scope"],), pinned))
+        return watched_model(model_names(window), pinned)
+    return bool(window.get("gates")) and (not window.get("scope") or watched_model((window["scope"],), pinned))
 
 
 def locks(account):

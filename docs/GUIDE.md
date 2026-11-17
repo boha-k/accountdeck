@@ -92,15 +92,17 @@ Accounts with and without a 5-hour limit sit side by side. Since 2026-10-30 veri
 (the former Max 20x) have only weekly limits: the general one and Fable's. Max, Pro and Ultra accounts
 still on Anthropic's temporary limit also have a 5-hour limit. Plans read Ultra, Max or Pro from the
 login's tier. Limits come from Claude's own list of meters, so a new meter holds and moves the terminals
-without a release, unless it belongs to another app or to a model you haven't pinned; codenames Claude
-doesn't list are never shown or counted.
+without a release, unless it belongs to another app or to a model that is neither Fable nor pinned; codenames
+Claude doesn't list are never shown or counted.
 
 ![The dashboard with Max and Ultra accounts side by side (demo mode, synthetic accounts)](images/dashboard-mixed.png)
 
 ### Auto-switch
 
-**Auto-switch** is on at **95 % used**, watching the 5-hour (where the account has one), weekly and
-pinned-model weekly limits ("Fable" also matches "Fable 5.1"). Order: **Soonest reset first**, **Most
+**Auto-switch** is on at **95 % used**, watching the 5-hour (where the account has one), the weekly and the
+Fable weekly limits, and the weekly limit of a model you pinned (a name also matches its versions: "Fable" is
+"Fable 5.1" too). Fable's limit always counts, whatever is pinned: an account that is out of Fable is left, and
+is no target. Order: **Soonest reset first**, **Most
 room left first** or **My own order**; the same accounts always give the same pick. A target needs a reading under 15
 minutes old, 10 points of room below the threshold in every watched window, no limit locked by Claude and,
 once known, a login lasting 12 more hours. Accounts whose reads are paused or failing, or whose automatic
@@ -111,25 +113,42 @@ hourly. While none qualifies, an account whose last read failed is read again (a
 rather than waiting for its next scheduled read.
 
 A passed reset counts as refilled until the next reading. A limit filling fast switches early when its
-burn rate would pass the threshold before the next check. When no account qualifies, every account is
+burn rate would pass the threshold before the next check; the burn rate counts only readings since the
+terminals came to that account and since the Mac last woke. When no account qualifies, every account is
 used up to 99 %: the active one stays until 99 %, then terminals move to an account with at least 2
 points left. An account that is out of a limit, needs sign-in or has under an hour of login left never
 waits: terminals move to the account with the most room by its last reading (up to a day old and at most
-97 % used), even one whose login ends within 12 hours if it has over 2 hours left. A 5-hour refill within
+97 % used), even one whose login ends within 12 hours if it has over 2 hours left. When the account in use
+works for no model at all (its weekly or 5-hour limit is spent, it is on hold or its login is gone) and every
+other account is out of a model's own limit only, the terminals move to the one whose week has the most
+room: other models still work there. An account that is only out of Fable is never left for another one
+that is out of Fable too; when that is all that is low, the alert says "All terminal accounts are low on
+their Fable weekly limit; other models still have room." A 5-hour refill within
 10 minutes and an expired idle terminal token hold only a threshold switch; a Claude outage holds nothing.
 
 Another action in progress holds auto-switch until it finishes, except a Claude Desktop, Codex or
 Antigravity switch still waiting for sessions to close: a switch your terminals need (threshold, limit
 reached or sign-in; never an early switch) cancels it before anything changed and tells you to start it
 again. Alerts say why no account can take over, and the dashboard says why auto-switch is paused. The
-optional early switch spends weekly allowance expiring within 24 hours. **Leave Out of Auto-Switch** in an
-account's **More** (⋯) menu excludes it (**Let Auto-Switch Use It** takes it back); after an automatic
+early switch, on by default (**Use weekly allowance before it resets** in Settings → Auto-Switch), spends weekly allowance expiring
+within 24 hours: only on an account whose week ends more than an hour before that of the account in use,
+and never within 2 hours of another automatic switch or of your own choice. **Leave Out of Auto-Switch** in
+an account's **More** (⋯) menu excludes it (**Let Auto-Switch Use It** takes it back); after an automatic
 switch **Undo** is available for 10 minutes.
+
+Your own choice stands. After **Undo**, or any switch you make in AccountDeck, auto-switch leaves the
+terminals on that account for 2 hours even when it is past your threshold, until a reading or the burn
+rate says 99 %. A limit reached, a lock or a login that ends still moves them at once.
+
+With **Use a limit reset when every terminal account is out** on (off by default), AccountDeck uses one
+limit reset by itself once every account is at 97 % or more, instead of using each up to 99 %, and
+auto-switch waits up to 2 minutes for the reading that shows the room.
+[Using one automatically](#using-one-automatically) has the rules.
 
 ### Limit errors
 
 AccountDeck also watches Claude Code's transcripts (read-only, every 3 s, only the lines added since).
-When a terminal session writes that it hit its 5-hour, weekly or pinned-model limit, AccountDeck reads
+When a terminal session writes that it hit its 5-hour, weekly, Fable or pinned-model limit, AccountDeck reads
 that account once more and, unless the reading shows room in that limit, moves the terminals within
 seconds, also while its own usage reads fail. An error up to 90 s after an account change belongs to the
 account just left, and an account left at a limit is not switched back to until a reading shows room or
@@ -403,7 +422,7 @@ now.").
   is refused never touches the usage reading; after a refusal, or three failures in a row, AccountDeck waits 6
   hours for that account and shows the earlier answer with its age. **Read Claude limit resets** in
   Settings → Advanced turns the read off: AccountDeck then shows no limit resets for Claude accounts and
-  cannot use one. It is on by default. Enabling it queues an ordinary usage refresh; the reset read still
+  cannot use one, by your click or automatically. It is on by default. Enabling it queues an ordinary usage refresh; the reset read still
   respects those intervals and any refusal backoff. Before a successful reset read, **Limit Resets…** says
   the count is unknown, with the reason and any waiting time. A manual refresh may need to wait for the
   15-minute interval even when ordinary usage has already changed.
@@ -451,13 +470,54 @@ returns the weekly allowance spent on Fable; it does not refill all weekly usage
 A use needs a sign-in that works now and a reading under an hour old: an account that needs a sign-in, a
 Codex sign-in about to expire, or a stale reading is refused with what to do first (usually **Refresh**).
 
+### Using one automatically
+
+**Use a limit reset when every terminal account is out**, in Settings → Auto-Switch, lets AccountDeck use a
+Claude Code limit reset without asking. It is off unless you turn it on, and it works only while
+auto-switch and **Read Claude limit resets** are on. A reset that is used cannot be had back, so the rules
+are narrow:
+
+- **When.** Every terminal account your terminals could run on must be out: at 97 % or more of its weekly
+  limit or its Fable weekly limit, by a reading under 15 minutes old, with that limit's own reset still
+  ahead. For the account in use it is your switch point, if you set that higher than 97 %: auto-switch
+  looks for another account only from there. The accounts that count are the one in use and
+  those auto-switch may move to. Accounts you left out of auto-switch, accounts still signed in on the PC,
+  and accounts that need sign-in, are on hold, are locked by Claude or are about to lose their login do
+  not count. One account with room is enough to use nothing, the one in use too while its sign-in is ending
+  or needs attention (a reset does not mend a sign-in). So is one whose reading cannot say (none
+  yet, too old, incomplete): that account is read again first. A reading that shows an account out cannot
+  say either when it was taken before a limit reset used on that account through AccountDeck (by you or
+  automatically) or in the 10 minutes after it, because usage can lag behind a reset. A limit that refills
+  by itself within 10 minutes is waited for. The 5-hour limit never causes a reset.
+- **Which.** A reset fits when the account's list would let you use it now and it refills every limit that
+  holds that account back: a Fable reset when only Fable's limit is out, a weekly or full reset when the
+  week is. The account in use comes first, so your terminals stay where they are. Otherwise AccountDeck
+  takes the reset that refills the least beyond what is out, then the one that expires first, then
+  auto-switch's order, and auto-switch moves the terminals there once a reading shows the room. An account
+  you left out of auto-switch is never reset. Codex and Claude Desktop resets are never used automatically.
+- **One at a time.** AccountDeck looks once more right before it sends, as it does for your own use, and
+  checks again that every account is still out, that the three settings are still on and that the reset
+  still refills what is out. It uses no further reset while another action runs, while the outcome of a use
+  on any Claude account is not known, before a reading of the account shows the refill, within an hour of
+  the last automatic reset, or within 10 minutes (doubling to an hour) of a try that used nothing.
+- **When it stops itself.** If a reading taken 10 minutes or more after a reset still shows that limit
+  out, AccountDeck uses no more limit resets by itself and raises the alert **Automatic limit
+  resets stopped**. Turn the setting off and on to start again. A reset used before you turned the setting
+  off is still checked by the account's next readings, so turning it on later starts afresh.
+- **Telling you.** Each automatic use shows as a report in the dashboard, a line in Recent activity and a
+  notification: "AccountDeck used one Fable reset on work by itself: every terminal account was at 97% or
+  more." A try that used nothing is reported once, with the reason.
+
+A reset that works only once a limit is reached becomes usable after Claude's next resets read (hourly).
+
 ### What AccountDeck never does with them
 
-- It never uses a limit reset by itself: not at a limit, not before one expires, not from auto-switch, an
-  alert or the forecast. Only your click on **Use Limit Reset** does, for that one account and reset.
+- It never uses a limit reset by itself unless you turned on **Use a limit reset when every terminal
+  account is out**, and then only as described above: never before one expires, never from an alert or the
+  forecast, never for Codex or Claude Desktop, never two at a time.
 - It never renews a sign-in in order to read or use one.
-- It never pretends to be Claude Code or Codex: Claude's requests carry AccountDeck's own name, and Codex's
-  are made by Codex itself.
+- Its requests carry AccountDeck's own name, except the two about a Claude account's limit resets (the
+  read and the use), which go out under Claude Code's name; Codex's are made by Codex itself.
 - It keeps no reset's id, no organisation id and no request key in the dashboard's data or in its log.
 
 ## Reliability

@@ -564,7 +564,7 @@ def _limit_shape(index, limit):
     """(window id, raw key, (kind, label, short, model, minutes), gates, scope) for one ``limits[]`` entry.
     `gates`: a meter of no known kind, or scoped to the terminals' own surface, keeps the server's label and
     holds terminals, so a new meter needs no release; one scoped to another surface does not, and one scoped
-    to a model (its name in `scope`) only while that model is pinned (rules.holds_terminals)."""
+    to a model (its name in `scope`) only while that model is Fable or pinned (rules.holds_terminals)."""
     kind = _label(limit.get("kind")) or _label(limit.get("type"))
     scope = limit.get("scope") if isinstance(limit.get("scope"), dict) else {}
     model_name, surface = _scope_name(scope, "model"), _scope_name(scope, "surface")
